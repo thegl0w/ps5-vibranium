@@ -12,6 +12,8 @@ vkd3d-proton.
 **Demo:** https://youtu.be/ygxBbsQypKQ (3 minutes, firmware 13.60, boot to desktop with the ps5wddm GPU driver).
 Gameplay and a full-install video will follow.
 
+**Questions:** see the [FAQ](docs/FAQ.md) (firmware, consoles, what the GPU driver adds, and how to check the project).
+
 You write one image to a USB drive and copy **your own** Windows ISO onto it. Then you start the PS5 Linux loader as usual,
 and the drive installs Windows by itself and starts it. Nothing on the PS5's internal storage is touched. To go back to
 plain PS5 use, shut Windows down and unplug the drive. There is nothing to uninstall.
