@@ -210,6 +210,11 @@ Drivers must be test-signed with a code-signing certificate of your own (`ps5gpu
 | Installer tree and tests | `installer/make_image_tree.py <out> --package <launch package> --frozen <freeze>`; `installer/tests/run_tests.sh` |
 | Image | `PS5WIN_PACKAGE=<launch package> image/build-image.sh` (Docker, Arch Linux; package versions as in `release/arch-packages.txt`). The PS5 kernel, modules and GPU firmware go into `image/collect/kernel`; see `release/KERNEL-SOURCE.md`. |
 
+> **Note (v1.0-beta):** `installer/payload/freeze-2026-11-23-r13.json`, the payload lock for this release, will be
+> added shortly. The `freeze-2026-11-23-r12.json` in the repository is the previous freeze and does **not** match this
+> release: it predates the final display driver (`ps5wddm` 0.3.1122.4977). Until r13 is added, the exact hashes of
+> the shipped payload are in `/opt/ps5win/installer/payload/payload.json` inside the release image.
+
 ## Source code and licences
 
 ps5win distributes binaries of these projects. Each keeps its own licence; the exact source versions we shipped and
