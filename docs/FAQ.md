@@ -3,6 +3,18 @@
 **Which consoles work?** The launch PS5 (disc or digital). The PS5 Slim is untested (reports welcome). The PS5 Pro is
 not supported.
 
+**Which firmware versions work?** Any firmware that can load Linux.
+
+**How is this different from just booting Windows on a PS5?** ps5win brings its own GPU driver: a WDDM display
+driver, Vulkan through Mesa RADV, and Direct3D 9 to 12 games through DXVK and vkd3d-proton. Without a GPU driver
+Windows falls back to the basic display adapter: no acceleration and no games. See the table at the top of the README
+for what works and what doesn't yet.
+
+**How do I know this is real?** The source for every part is in this repository, with its licence and origin
+(docs/ORIGINS.md, docs/CLEANROOM.md). Releases are signed (check the `.minisig` as the README describes). The demo video
+shows a boot to the desktop with the GPU driver. Parts of the code and docs were written with AI help, as the README
+says. Everything shipped was tested on a real console.
+
 **Which Windows?** Only the ISO named in the README (Windows 10 IoT Enterprise LTSC 2021, build 19044.1288, with the
 SHA-256 given there). The installer checks the edition and kernel build and refuses anything else before writing.
 

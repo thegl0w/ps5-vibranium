@@ -9,7 +9,11 @@ body:
     id: boot
     attributes:
       label: Did Windows start?
-      options: ["Yes, Windows booted", "No, it did not boot", "The installer did not finish"]
+      options:
+        - "The PS5 Linux loader did not start (not a ps5win problem: see the loader's own project)"
+        - "The loader started, but the installer did not finish"
+        - "The installer finished, but Windows did not boot"
+        - "Windows booted, but something does not work"
     validations: {required: true}
   - type: dropdown
     id: model
