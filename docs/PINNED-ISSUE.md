@@ -14,5 +14,5 @@ network names, MAC/IP addresses) first.
 
 **Security problems:** report them privately (Security tab, "Report a vulnerability"), never in a public issue.
 
-**Questions:** please use Discussions. Before asking, see the [FAQ](docs/FAQ.md) and
-[Troubleshooting](README.md#troubleshooting).
+**Questions:** please use Discussions. Before asking, see the [FAQ](https://github.com/thegl0w/ps5win/blob/main/docs/FAQ.md) and
+[Troubleshooting](https://github.com/thegl0w/ps5win/blob/main/README.md#troubleshooting).

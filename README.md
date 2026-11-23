@@ -27,7 +27,7 @@ Enterprise LTSC 2021.
 |---|---|
 | Install | Fully automatic from the USB drive: finds the ISO, shows the target disk, 30-second countdown (any key cancels), installs, starts Windows. Logs are written to the drive. |
 | Boot | The PS5 Linux loader, then Linux, then our UEFI firmware, then Windows. After the install, a 10-second countdown starts Windows by itself; any key stays in Linux. |
-| Display | Our WDDM 1.3 kernel driver (`ps5wddm`). The Windows compositor (dwm.exe) renders on the GPU. The screen's own resolution (up to 3840×2160) at **60 Hz**. Optional line in `ps5win-display.txt` on PS5ISO: `mode=2560x1440` picks another resolution the screen offers. (120 Hz works in development and comes in a later release.) |
+| Display | Our WDDM 1.3 kernel driver (`ps5wddm`). The Windows compositor (dwm.exe) renders on the GPU. The screen's own resolution at **60 Hz** (tested at 1920×1080 and 2560×1440; 4K is untested). Optional line in `ps5win-display.txt` on PS5ISO: `mode=2560x1440` picks another resolution the screen offers. (120 Hz works in development and comes in a later release.) |
 | Vulkan | Mesa RADV, ported to Windows on our own kernel interface (`libps5gpu`). 64-bit and 32-bit. |
 | Direct3D 10/11 (system) | Mesa's D3D10 user-mode driver on Zink on RADV. Runs the desktop and ordinary programs. |
 | Games | A game kit adds DXVK (D3D9/10/11) and vkd3d-proton (D3D12) next to a game's exe, automatically within seconds of the game appearing, or from the right-click menu. Tested in a window (162 fps, heavy shader) and full screen with direct scan-out (60 fps, vsync). |
@@ -116,7 +116,7 @@ On every later start: start the PS5 Linux loader, and Windows comes up after a 1
 ### Optional: answer file
 
 Put `ps5win-answers.txt` on `PS5ISO` before the install to set the user name, computer name, time zone and similar.
-Copy `installer/ps5win-answers.example.txt` (also in the image at `/opt/ps5win/installer/`) to the `PS5ISO` partition as `ps5win-answers.txt` and uncomment what you want. A password set there sits in plain text on `PS5ISO`; setting it in Windows afterwards is safer.
+Copy `installer/ps5win-answers.example.txt` (also in the image at `/opt/ps5win/installer/`) to the `PS5ISO` partition as `ps5win-answers.txt` and uncomment what you want.
 
 **Don't put a password in it yet.** The `PS5ISO` partition is readable on any computer, and the file stays there after
 the install. Set your password in Windows after the install instead: press Ctrl+Alt+Del, then *Change a password*.
@@ -250,7 +250,7 @@ Credits required by the licences of code ps5win uses or ships:
 - **[ps5-hackintosh](https://github.com/rodri0x/ps5-hackintosh)** by rodri0x (MIT): the launcher stub and the base of
   the UEFI firmware build (EDK2 payload setup, bundle maker).
 - **Linux** with the **[ps5-linux](https://github.com/ps5-linux/ps5-linux-patches)** kernel patches (GPL-2.0): the
-  image's kernel and the launch package's stage kernel; source and configuration in KERNEL-SOURCE.md.
+  image's kernel and the launch package's stage kernel; source and configuration in `release/KERNEL-SOURCE.md`.
 - EDK2, Mesa, DXVK, vkd3d-proton, the Vulkan loader, wimlib, hivex, Arch Linux packages, AMD GPU microcode
   (`LICENSE.amdgpu`): see the licence table above and `release/licenses/`.
 

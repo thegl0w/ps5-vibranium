@@ -11,7 +11,7 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `.gitignore` | `c7664b5b36551b63` | ours | MIT | - |
 | `CONTRIBUTING.md` | `4673b86b6ac87a23` | ours | MIT | - |
 | `LICENSE` | `aab31633bff4a0be` | ours (the MIT text of release/LICENSE) | MIT | - |
-| `README.md` | `414da57838b03564` | ours | MIT | - |
+| `README.md` | `5976e912a5cac10d` | ours | MIT | - |
 | `SECURITY.md` | `53dcddeedf3ed5b5` | ours | MIT | - |
 | `cleanroom/directload-mit/CyanDirectLoad.cpp` | `1b62e949ae61539f` | clean-room rewrite from cleanroom/spec-directload.md (replaces MetalCyan's CyanDirectLoad) | MIT | MetalCyan:MetalCyan/CyanDirectLoad.cpp (1 runs, longest 4 lines) |
 | `cleanroom/directload-mit/CyanDirectLoad.hpp` | `d2e555f6a333a229` | clean-room rewrite from cleanroom/spec-directload.md (replaces MetalCyan's CyanDirectLoad) | MIT | MetalCyan:MetalCyan/CyanDirectLoad.hpp (24 runs, longest 15 lines) |
@@ -35,7 +35,7 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `docs/CLONECHECK.md` | `92452921b9d39444` | ours | MIT | - |
 | `docs/FAQ.md` | `391873a841e86a7e` | ours | MIT | - |
 | `docs/ORIGINS.md` | `07c3253977ce1e21` | ours | MIT | - |
-| `docs/PINNED-ISSUE.md` | `b9bd83cb1f93c040` | ours | MIT | - |
+| `docs/PINNED-ISSUE.md` | `410221b5318e8f3e` | ours | MIT | - |
 | `firmware/build_stage.sh` | `cd22a1c06061297b` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
 | `firmware/compile.sh` | `d0d10d429dcba40a` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
 | `firmware/kms_linear.py` | `2153e4d9152f6017` | derived from ps5-hackintosh bringup/tools/kms_linear.py (rodri0x), credited in its header | MIT | ps5-hackintosh:bringup/tools/kms_linear.py (100 runs, longest 71 lines); ps5-hackintosh:bringup/tools/patch_tripwire.py (7 runs, longest 10 lines) |
