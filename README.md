@@ -1,5 +1,7 @@
 # ps5win: Windows 10 on the PlayStation 5, with a GPU driver
 
+> **Beta.** This is the first public release. Expect rough edges, and please report what you find.
+
 ps5win installs **Windows 10 IoT Enterprise LTSC 2021** on a launch-model PS5 and runs it bare metal from a USB drive.
 Its own GPU driver gives Windows a GPU-accelerated desktop, Vulkan, and Direct3D 9 to 12 games through DXVK and
 vkd3d-proton.
@@ -27,7 +29,7 @@ Enterprise LTSC 2021.
 | Direct3D 10/11 (system) | Mesa's D3D10 user-mode driver on Zink on RADV. Runs the desktop and ordinary programs. |
 | Games | A game kit adds DXVK (D3D9/10/11) and vkd3d-proton (D3D12) next to a game's exe, automatically within seconds of the game appearing, or from the right-click menu. Tested in a window (162 fps, heavy shader) and full screen with direct scan-out (60 fps, vsync). |
 | GPU robustness | A program that dies mid-frame can't stall the GPU for everyone. A watchdog restarts a hung GPU without restarting Windows. |
-| Network | Ethernet, with our own driver (`p5eth.sys`). Connect the cable before starting; hot-plug comes later. |
+| Network | Ethernet, with our own driver (`p5eth.sys`), **experimental**: the link comes up, but in our latest tests Windows didn't always get an address by DHCP. Connect the cable before starting; hot-plug comes later. A USB network adapter is the alternative. |
 | Storage | USB drives. Other USB drives plugged in while Windows runs get a drive letter as usual. The internal NVMe is blocked on purpose (see Safety). |
 
 ## What doesn't work (yet)
