@@ -47,4 +47,5 @@ What it found, and why each finding is not copied code:
 No shipped file shares code with Linux's amdgpu driver or the ps5-linux kernel patch. Register names and offsets come
 from Linux's amdgpu register headers, which are MIT-licensed and are included at build time, not copied.
 
-Not covered: NootedRed (not compared; MetalCyan, which was compared, is the code we read).
+NootedRed (ChefKiss, commit 9ff85a6 of 2026-10-10, 98 source files) was compared separately on 2026-11-23 with the
+same detector: no shipped file shares code with it.

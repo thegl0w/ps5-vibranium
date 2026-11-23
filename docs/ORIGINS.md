@@ -31,10 +31,10 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `cleanroom/spec-directload.md` | `ec0f41d49774d0a8` | clean-room specification (written description; see CLEANROOM.md) | MIT | - |
 | `cleanroom/spec-icc-reset.md` | `fecf9352a2385604` | clean-room specification (written description; see CLEANROOM.md) | MIT | - |
 | `cleanroom/spec-p5eth.md` | `8b88a5fb0791d8ad` | clean-room specification (written description; see CLEANROOM.md) | MIT | - |
-| `docs/CLEANROOM.md` | `7bd2d0536f72c979` | ours | MIT | - |
+| `docs/CLEANROOM.md` | `42f2c8d77fa764a3` | ours | MIT | - |
 | `docs/CLONECHECK.md` | `92452921b9d39444` | ours | MIT | - |
 | `docs/FAQ.md` | `391873a841e86a7e` | ours | MIT | - |
-| `docs/ORIGINS.md` | `b386d77750f2af58` | ours | MIT | - |
+| `docs/ORIGINS.md` | `ab8c9b0dbaa0b377` | ours | MIT | - |
 | `docs/PINNED-ISSUE.md` | `410221b5318e8f3e` | ours | MIT | - |
 | `firmware/build_stage.sh` | `cd22a1c06061297b` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
 | `firmware/compile.sh` | `d0d10d429dcba40a` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
