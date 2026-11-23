@@ -17,6 +17,7 @@ release/README.md => README.md
 build/boot47/run_stage.sh => firmware/run_stage.sh
 
 # Release docs and licences (CHECKLIST.md and REVIEW-*.md are internal working notes; README.md is published at the root)
+LICENSE
 release/LICENSE
 release/RELEASING.md
 release/ps5win.pub
@@ -38,6 +39,7 @@ installer/ps5win-answers.example.txt
 installer/lib/*.py
 installer/payload/manifest.txt
 installer/payload/freeze-2026-11-23-r12.json
+installer/payload/freeze-2026-11-23-r13.json
 installer/payload/pinned/
 installer/payload/setup/
 installer/tests/

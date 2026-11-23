@@ -24,7 +24,12 @@ RULES = [  # (path regex, origin, licence)
     (r"^ps5wifi/devadd\.c$", "ours (MIT; the only file shipped from the ps5wifi folder)", "MIT"),
     (r"^release/", "ours", "MIT"),
     (r"^(SECURITY|CONTRIBUTING)\.md$|^\.gitignore$", "ours", "MIT"),
+    (r"^LICENSE$", "ours (the MIT text of release/LICENSE)", "MIT"),
 ]
+# Not published: the export repo's own git data and OS/editor clutter. Skipped so a run on the git-tracked export
+# lists only the shipped tree (the run on 2026-11-23 listed 264 .git/ rows as UNCLASSIFIED).
+SKIP_DIRS = {".git", "__pycache__"}
+SKIP_FILES = {".DS_Store"}
 SELF = {("ps5wifi/devadd.c", "GPL-ps5wifi", "devadd.c")}   # the corpus copy is the same file of ours (MIT), not a source
 
 
@@ -37,7 +42,9 @@ def main():
             hits.setdefault(m[1], []).append(f"{m[2].strip()}:{m[3]} ({m[4]} runs, longest {m[5]} lines)")
     rows = []
     for p in sorted(x for x in tree.rglob("*") if x.is_file()):
-        rel = str(p.relative_to(tree))
+        rel = p.relative_to(tree).as_posix()
+        if SKIP_DIRS.intersection(rel.split("/")[:-1]) or p.name in SKIP_FILES:
+            continue
         origin, lic = next(((o, l) for rx, o, l in RULES if re.search(rx, rel)), ("UNCLASSIFIED", "?"))
         sha = hashlib.sha256(p.read_bytes()).hexdigest()[:16]
         rows.append(f"| `{rel}` | `{sha}` | {origin} | {lic} | {'; '.join(hits.get(rel, [])) or '-'} |")

@@ -1,6 +1,6 @@
 # Per-file origin list
 
-194 files. SHA-256 (first 16 hex digits) of the file as published. "Shared code" = the clone detector's
+195 files. SHA-256 (first 16 hex digits) of the file as published. "Shared code" = the clone detector's
 finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one is explained).
 
 | File | SHA-256 | Origin | Licence | Shared code (clone detector) |
@@ -11,7 +11,7 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `.gitignore` | `c7664b5b36551b63` | ours | MIT | - |
 | `CONTRIBUTING.md` | `4673b86b6ac87a23` | ours | MIT | - |
 | `LICENSE` | `aab31633bff4a0be` | ours (the MIT text of release/LICENSE) | MIT | - |
-| `README.md` | `ceb9aba16e75a07e` | ours | MIT | - |
+| `README.md` | `5254438b86e44ed1` | ours | MIT | - |
 | `SECURITY.md` | `53dcddeedf3ed5b5` | ours | MIT | - |
 | `cleanroom/directload-mit/CyanDirectLoad.cpp` | `1b62e949ae61539f` | clean-room rewrite from cleanroom/spec-directload.md (replaces MetalCyan's CyanDirectLoad) | MIT | MetalCyan:MetalCyan/CyanDirectLoad.cpp (1 runs, longest 4 lines) |
 | `cleanroom/directload-mit/CyanDirectLoad.hpp` | `d2e555f6a333a229` | clean-room rewrite from cleanroom/spec-directload.md (replaces MetalCyan's CyanDirectLoad) | MIT | MetalCyan:MetalCyan/CyanDirectLoad.hpp (24 runs, longest 15 lines) |
@@ -34,7 +34,7 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `docs/CLEANROOM.md` | `7bd2d0536f72c979` | ours | MIT | - |
 | `docs/CLONECHECK.md` | `92452921b9d39444` | ours | MIT | - |
 | `docs/FAQ.md` | `391873a841e86a7e` | ours | MIT | - |
-| `docs/ORIGINS.md` | `07c3253977ce1e21` | ours | MIT | - |
+| `docs/ORIGINS.md` | `b386d77750f2af58` | ours | MIT | - |
 | `docs/PINNED-ISSUE.md` | `410221b5318e8f3e` | ours | MIT | - |
 | `firmware/build_stage.sh` | `cd22a1c06061297b` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
 | `firmware/compile.sh` | `d0d10d429dcba40a` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
@@ -87,6 +87,7 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `installer/make_unattend.py` | `27d872d773cd3785` | ours | MIT | - |
 | `installer/offline_reg.py` | `7fcd547f4c2b06b3` | ours | MIT | - |
 | `installer/payload/freeze-2026-11-23-r12.json` | `818d8bb76058f8ea` | ours | MIT | - |
+| `installer/payload/freeze-2026-11-23-r13.json` | `7417bdd20e3c76b4` | ours | MIT | - |
 | `installer/payload/manifest.txt` | `d063f838955aeac0` | ours | MIT | - |
 | `installer/payload/pinned/autostart.cmd` | `1fadf108a7b3f183` | ours | MIT | - |
 | `installer/payload/setup/SetupComplete.cmd` | `5e770d846efae507` | ours | MIT | - |
@@ -171,7 +172,7 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `release/LONGRUN-TESTS.md` | `59b2942444fad772` | ours | MIT | - |
 | `release/RELEASING.md` | `c4c1378fbd901174` | ours | MIT | - |
 | `release/arch-packages.txt` | `fc7f617fabcfcab0` | ours | MIT | - |
-| `release/export-allowlist.txt` | `efd005849126ecf4` | ours | MIT | - |
+| `release/export-allowlist.txt` | `27b3362666a039e6` | ours | MIT | - |
 | `release/export.py` | `4635deb3753757b0` | ours | MIT | - |
 | `release/kernel-7.2.3-p5f6b.config` | `b150c6149c3f07e9` | ours | MIT | - |
 | `release/licenses/Apache-2.0.txt` | `074e6e32c86a4c0e` | third-party licence text, verbatim | as named in the file | - |
@@ -195,7 +196,7 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `release/longrun-record.ps1` | `7c3dfbdbede1d4d4` | ours | MIT | - |
 | `release/ps5win.pub` | `d4ca4fef99291126` | ours | MIT | - |
 | `tools/clonecheck.py` | `265ca2186ca977d3` | ours | MIT | - |
-| `tools/origins.py` | `0f8e897d01676b57` | ours | MIT | - |
+| `tools/origins.py` | `e711e8d63def3a2c` | ours | MIT | - |
 | `winremote/build-ps5therm.sh` | `9e32519df37e1a08` | ours | MIT | - |
 | `winremote/ps5guard.cmd` | `cf6a7b45aa6f706d` | ours | MIT | - |
 | `winremote/ps5therm.c` | `f89ff7fd177914d8` | ours | MIT | - |
