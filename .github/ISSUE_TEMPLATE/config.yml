@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and help
+    url: https://github.com/thegl0w/ps5win/discussions
+    about: Ask questions in Discussions, not in issues.
+  - name: Security problem
+    url: https://github.com/thegl0w/ps5win/security/advisories/new
+    about: Report security problems privately, never in a public issue.

@@ -1,0 +1,52 @@
+name: Bug report
+description: Something does not work as the README says.
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Remove personal data (serial numbers, network names, MAC/IP addresses) from everything you attach.
+  - type: dropdown
+    id: boot
+    attributes:
+      label: Did Windows start?
+      options: ["Yes, Windows booted", "No, it did not boot", "The installer did not finish"]
+    validations: {required: true}
+  - type: dropdown
+    id: model
+    attributes:
+      label: Console model
+      options: ["Launch PS5 (disc or digital)", "PS5 Slim", "Other"]
+    validations: {required: true}
+  - type: input
+    id: firmware
+    attributes:
+      label: PS5 system software version
+    validations: {required: true}
+  - type: input
+    id: drive
+    attributes:
+      label: USB drive (brand, model, size; adapter or enclosure if any)
+    validations: {required: true}
+  - type: input
+    id: isohash
+    attributes:
+      label: SHA-256 of your Windows ISO
+    validations: {required: true}
+  - type: input
+    id: version
+    attributes:
+      label: ps5win release (image file name or SHA-256)
+    validations: {required: true}
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: The last thing on screen, any message, and the step where it stopped.
+    validations: {required: true}
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: >
+        Attach what you have: C:\ps5\gpu\autostart.log and start.log, C:\ps5\install.log, the firmware trace files
+        (ps5-boot22-trace*.txt) from the PS5BOOT partition, and the logs/ folder from the PS5ISO partition.

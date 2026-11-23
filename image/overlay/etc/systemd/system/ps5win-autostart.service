@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MIT
+[Unit]
+Description=PS5 Windows: start Windows, or install it on the first start
+After=systemd-user-sessions.service local-fs.target
+Conflicts=getty@tty1.service
+
+[Service]
+Type=idle
+ExecStart=/opt/ps5win/ps5win-autostart.sh
+StandardInput=tty
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TTYVTDisallocate=yes
+Restart=no
+# the crash job run_stage.sh leaves behind must outlive this service if it ever stops early
+KillMode=process
+ExecStopPost=/usr/bin/systemctl --no-block start getty@tty1.service
+
+[Install]
+WantedBy=multi-user.target

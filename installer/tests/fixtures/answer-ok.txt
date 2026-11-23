@@ -1,0 +1,3 @@
+# dev workflow: stands in for the typed yes
+target_serial=T7TARGET0002
+mode=erase

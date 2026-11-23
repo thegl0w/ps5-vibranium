@@ -1,0 +1,5 @@
+# test answers (fixture disks, no real values)
+target_serial=T7TARGET0002
+mode=erase
+computer_name=PS5WIN
+time_zone=UTC

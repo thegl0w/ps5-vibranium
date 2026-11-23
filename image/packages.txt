@@ -1,0 +1,21 @@
+# Arch packages of the installer/launcher system on the Toshiba (no kernel package: the PS5 kernel is added separately)
+base
+mkinitcpio
+kexec-tools
+wimlib
+ntfs-3g
+gptfdisk
+dosfstools
+exfatprogs
+parted
+e2fsprogs
+python
+hivex
+pciutils
+usbutils
+kbd
+terminus-font
+zstd
+xz
+less
+nano

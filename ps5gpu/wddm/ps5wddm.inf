@@ -1,0 +1,69 @@
+; ps5wddm: display-only WDDM driver for the PS5's GPU (stage W1). MIT licence.
+; The second hardware ID is QEMU's standard VGA card, for rehearsals in a VM.
+[Version]
+Signature="$Windows NT$"
+Class=Display
+ClassGuid={4d36e968-e325-11ce-bfc1-08002be10318}
+Provider=%Provider%
+DriverVer=11/20/2026,0.3.2.0
+CatalogFile=ps5wddm.cat
+PnpLockdown=1
+
+[DestinationDirs]
+DefaultDestDir=12
+
+[SourceDisksNames]
+1=%Disk%
+
+[SourceDisksFiles]
+ps5wddm.sys=1
+
+[Manufacturer]
+%Provider%=Models,NTamd64
+
+[Models.NTamd64]
+%NamePs5%=Install, PCI\VEN_1002&DEV_13FC
+%NameVm%=Install, PCI\VEN_1234&DEV_1111
+
+[Install]
+FeatureScore=F9
+CopyFiles=Files
+AddReg=SoftwareSettings
+
+[Files]
+ps5wddm.sys
+
+; Message-signalled interrupt: this machine cannot route the GPU's interrupt line, and without MSI Windows reports a
+; resource conflict (problem 12) and the driver never starts. Same setting that fixed the HDMI audio function.
+[Install.HW]
+AddReg=Msi
+
+[Msi]
+HKR,"Interrupt Management",,0x00000010
+HKR,"Interrupt Management\MessageSignaledInterruptProperties",,0x00000010
+HKR,"Interrupt Management\MessageSignaledInterruptProperties",MSISupported,0x00010001,1
+
+[SoftwareSettings]
+HKR,,VgaCompatible,0x00010001,0
+; A full graphics driver names its user-mode halves here (Direct3D 9, 10, 11, 12). Test value for now: a file that
+; does not exist, to see whether Windows wants the entry at all before it starts the adapter.
+HKR,,UserModeDriverName,0x00010000,"C:\ps5\gpu\d3d10\libgallium_d3d10.dll","C:\ps5\gpu\d3d10\libgallium_d3d10.dll","C:\ps5\gpu\d3d10\libgallium_d3d10.dll","C:\ps5\gpu\d3d10\libgallium_d3d10.dll"
+HKR,,UserModeDriverNameWow,0x00010000,"ps5umd_none.dll","ps5umd_none.dll","ps5umd_none.dll","ps5umd_none.dll"
+HKR,,InstalledDisplayDrivers,0x00010000,"libgallium_d3d10","libgallium_d3d10","libgallium_d3d10","libgallium_d3d10"
+
+[Install.Services]
+AddService=ps5wddm,0x00000002,Service
+
+[Service]
+DisplayName=%NamePs5%
+ServiceType=1
+StartType=3
+ErrorControl=0
+LoadOrderGroup=Video
+ServiceBinary=%12%\ps5wddm.sys
+
+[Strings]
+Provider="PS5 GPU project"
+Disk="ps5wddm files"
+NamePs5="PS5 GPU (ps5wddm)"
+NameVm="ps5wddm rehearsal on QEMU VGA"

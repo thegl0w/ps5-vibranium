@@ -1,0 +1,5 @@
+// SPDX-License-Identifier: MIT
+// Kernel build only (wddm/build.sh): the few C++ library names CyanDirectLoad.cpp and tool/regs.h use, without the STL.
+#pragma once
+#include <stddef.h>
+namespace std { using ::size_t; using ::ptrdiff_t; }

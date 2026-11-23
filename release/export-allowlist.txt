@@ -1,0 +1,125 @@
+# SPDX-License-Identifier: MIT
+# Public-repo allowlist: only files matching a line here are exported (release/export.py). Paths are relative to the
+# repo root. A line ending in "/" takes the whole folder; "*" matches within one path segment, "**" across segments.
+# "!pattern" removes files again (applied after all includes). Symlinks are never exported. Anything not listed stays
+# out: build/, dev notes (NEXT.md, HANDOFF*, WORKAROUNDS.md, ...), dev helpers with home-LAN/disk details, GPL leftovers.
+
+.gitignore
+SECURITY.md
+CONTRIBUTING.md
+.github/
+docs/
+tools/clonecheck.py
+tools/origins.py
+# The README also becomes the repository's front page ("source => published path").
+release/README.md => README.md
+# The release launcher exactly as it ships in the launch package (byte-identical to the image's copy).
+build/boot47/run_stage.sh => firmware/run_stage.sh
+
+# Release docs and licences (CHECKLIST.md and REVIEW-*.md are internal working notes; README.md is published at the root)
+release/LICENSE
+release/RELEASING.md
+release/ps5win.pub
+release/KERNEL-SOURCE.md
+release/LONGRUN-TESTS.md
+release/longrun-record.ps1
+release/arch-packages.txt
+release/kernel-7.2.3-p5f6b.config
+release/licenses/
+release/export-allowlist.txt
+release/export.py
+
+# Installer (Linux-side session that writes Windows); only the current payload freeze
+installer/README.md
+installer/autorun
+installer/*.py
+installer/deny.txt
+installer/ps5win-answers.example.txt
+installer/lib/*.py
+installer/payload/manifest.txt
+installer/payload/freeze-2026-11-23-r12.json
+installer/payload/pinned/
+installer/payload/setup/
+installer/tests/
+
+# Image build (Docker, Arch); collect/ holds kernel/module/firmware binaries (GPL source ships with the release)
+image/build-image.sh
+image/build-base.sh
+image/assemble-inside.sh
+image/base-inside.sh
+image/packages.txt
+image/overlay/
+
+# UEFI firmware (EDK2 payload) sources and the launch-package tools
+firmware/build_stage.sh
+firmware/compile.sh
+firmware/kms_linear.py
+firmware/kstub_table.py
+firmware/make_bundle.py
+firmware/make_kstub.py
+firmware/prepare.py
+firmware/make_kpat.py
+firmware/pack_package.sh
+firmware/ps5warm/
+firmware/*.inc
+
+# Clean-room MIT rewrites (Ethernet driver, reset library, GPU microcode loader) + their written specs
+cleanroom/*-mit/
+cleanroom/spec-*.md
+
+# GPU: kernel driver, WDDM display driver, user library, Mesa patch + cross-build, the shipped Windows scripts
+ps5gpu/README.md
+ps5gpu/build.sh
+ps5gpu/include/
+ps5gpu/kmd/
+ps5gpu/lib/
+ps5gpu/tool/
+ps5gpu/wddm/build.sh
+ps5gpu/wddm/gpuboot.cpp
+ps5gpu/wddm/gpuboot.h
+ps5gpu/wddm/kcompat/
+ps5gpu/wddm/ntload.c
+ps5gpu/wddm/p5min.c
+ps5gpu/wddm/ps5wddm.cpp
+ps5gpu/wddm/ps5wddm.inf
+ps5gpu/mesa/mesa-ps5.patch
+ps5gpu/mesa/configure.sh
+ps5gpu/mesa/mingw-cross.txt
+ps5gpu/mesa/ac_ps5_drm.cpp
+ps5gpu/mesa/shim/
+ps5gpu/win/start.cmd
+ps5gpu/win/autostart.cmd
+ps5gpu/win/wddm-mode.cmd
+ps5gpu/win/gdi-mode.cmd
+ps5gpu/win/gpu-recover.cmd
+ps5gpu/win/vkreg/ps5_icd.json
+ps5gpu/win/vkreg/vk-install.cmd
+ps5gpu/win/kit/ps5-gamekit.ps1
+ps5gpu/win/kit/kit-install.cmd
+ps5gpu/win/kit/kit-install.ps1
+ps5gpu/win/kit/kit-menu.ps1
+ps5gpu/win/setup/gamebar-off.ps1
+ps5gpu/win/setup/shader-cache-dirs.ps1
+
+# Small Windows helpers shipped in the payload
+winremote/ps5guard.cmd
+winremote/ps5therm.c
+winremote/build-ps5therm.sh
+ps5wifi/devadd.c
+
+!firmware/dev_disks.inc
+!**/__pycache__/**
+!**/.DS_Store
+!**/._*
+!**/*.exe
+!**/*.dll
+!**/*.sys
+!**/*.cat
+!**/*.obj
+!**/*.lib
+!**/*.pem
+!**/*.key
+!**/*.pfx
+!**/*.pvk
+!**/*.p12
+!**/*.cer

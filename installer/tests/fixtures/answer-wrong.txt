@@ -1,0 +1,2 @@
+target_serial=T7TARGET0009
+mode=erase

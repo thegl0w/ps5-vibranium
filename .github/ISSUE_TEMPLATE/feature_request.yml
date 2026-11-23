@@ -1,0 +1,13 @@
+name: Feature request
+description: An idea for ps5win.
+labels: [enhancement]
+body:
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would you like, and why?
+    validations: {required: true}
+  - type: textarea
+    id: tested
+    attributes:
+      label: Anything you already tried or measured

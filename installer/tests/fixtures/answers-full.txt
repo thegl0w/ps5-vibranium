@@ -1,0 +1,7 @@
+# test values only, not real
+computer_name=TESTBOX-01
+user_name=player
+password=Fixture-Pass-123
+time_zone=Tokyo Standard Time
+locale=en-GB
+product_key=abcde-fghij-klmno-pqrst-uvwxy

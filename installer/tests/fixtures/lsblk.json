@@ -1,0 +1,90 @@
+{
+ "blockdevices": [
+  {
+   "name": "sda",
+   "path": "/dev/sda",
+   "type": "disk",
+   "tran": "usb",
+   "serial": "LNXSSD0001",
+   "children": [
+    {
+     "name": "sda1",
+     "path": "/dev/sda1",
+     "type": "part",
+     "fstype": "vfat",
+     "mountpoint": "/boot"
+    },
+    {
+     "name": "sda2",
+     "path": "/dev/sda2",
+     "type": "part",
+     "fstype": "btrfs",
+     "mountpoint": "/"
+    }
+   ]
+  },
+  {
+   "name": "sdb",
+   "path": "/dev/sdb",
+   "type": "disk",
+   "tran": "usb",
+   "serial": "T7TARGET0002",
+   "children": [
+    {
+     "name": "sdb1",
+     "path": "/dev/sdb1",
+     "type": "part",
+     "fstype": "exfat",
+     "mountpoint": null
+    }
+   ]
+  },
+  {
+   "name": "sdc",
+   "path": "/dev/sdc",
+   "type": "disk",
+   "tran": "usb",
+   "serial": "ISOSTICK0003",
+   "children": [
+    {
+     "name": "sdc1",
+     "path": "/dev/sdc1",
+     "type": "part",
+     "fstype": "ntfs",
+     "mountpoint": null
+    },
+    {
+     "name": "sdc2",
+     "path": "/dev/sdc2",
+     "type": "part",
+     "fstype": "swap",
+     "mountpoint": null
+    }
+   ]
+  },
+  {
+   "name": "nvme0n1",
+   "path": "/dev/nvme0n1",
+   "type": "disk",
+   "tran": "nvme",
+   "serial": "SONYINTERNAL",
+   "children": [
+    {
+     "name": "nvme0n1p1",
+     "path": "/dev/nvme0n1p1",
+     "type": "part",
+     "fstype": "exfat",
+     "mountpoint": null
+    }
+   ]
+  },
+  {
+   "name": "sr0",
+   "path": "/dev/sr0",
+   "type": "rom",
+   "tran": "sata",
+   "serial": "BD",
+   "children": null
+  }
+ ]
+}

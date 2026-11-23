@@ -1,0 +1,66 @@
+; SPDX-License-Identifier: MIT
+; p5eth.inf - PS5 wired Ethernet (root-enumerated NDIS 6.30 miniport)
+; Install: devadd.exe C:\ps5\eth\p5eth.inf root\p5eth
+
+[Version]
+Signature   = "$WINDOWS NT$"
+Class       = Net
+ClassGUID   = {4d36e972-e325-11ce-bfc1-08002be10318}
+Provider    = %ProviderName%
+DriverVer   = 11/21/2026,1.0.0.0
+CatalogFile = p5eth.cat
+PnpLockdown = 1
+
+[DestinationDirs]
+DefaultDestDir    = 13
+P5Eth.CopyFiles   = 13
+
+[SourceDisksNames]
+1 = %DiskName%,,,""
+
+[SourceDisksFiles]
+p5eth.sys = 1
+
+[Manufacturer]
+%ProviderName% = P5Models, NTamd64.10.0
+
+[P5Models.NTamd64.10.0]
+%P5Eth.DeviceDesc% = P5Eth.ndi, root\p5eth
+
+[P5Eth.ndi.NTamd64]
+Characteristics    = 0x4        ; NCF_PHYSICAL
+BusType            = 0          ; Internal
+AddReg             = P5Eth.Reg
+CopyFiles          = P5Eth.CopyFiles
+*IfType            = 6          ; IF_TYPE_ETHERNET_CSMACD
+*MediaType         = 0          ; NdisMedium802_3
+*PhysicalMediaType = 14         ; NdisPhysicalMedium802_3
+*IfConnectorPresent = 1
+*ConnectionType    = 1          ; NET_IF_CONNECTION_DEDICATED
+*DirectionType     = 0          ; NET_IF_DIRECTION_SENDRECEIVE
+*AccessType        = 2          ; NET_IF_ACCESS_BROADCAST
+*HardwareLoopback  = 0
+
+[P5Eth.ndi.NTamd64.Services]
+AddService = p5eth, 2, P5Eth.Service
+
+[P5Eth.Reg]
+HKR, Ndi,            Service,    0, "p5eth"
+HKR, Ndi\Interfaces, UpperRange, 0, "ndis5"
+HKR, Ndi\Interfaces, LowerRange, 0, "ethernet"
+
+[P5Eth.CopyFiles]
+p5eth.sys,,,2
+
+[P5Eth.Service]
+DisplayName    = %P5Eth.ServiceName%
+ServiceType    = 1              ; SERVICE_KERNEL_DRIVER
+StartType      = 3              ; SERVICE_DEMAND_START
+ErrorControl   = 1              ; SERVICE_ERROR_NORMAL
+ServiceBinary  = %13%\p5eth.sys
+
+[Strings]
+ProviderName       = "ps5win"
+DiskName           = "p5eth install disk"
+P5Eth.DeviceDesc   = "PS5 Ethernet (p5eth)"
+P5Eth.ServiceName  = "PS5 Ethernet miniport"

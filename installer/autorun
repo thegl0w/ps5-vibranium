@@ -1,0 +1,3 @@
+#!/bin/sh
+# Entry point called by /opt/ps5win/ps5win-autostart.sh on tty1 when Windows is not installed yet.
+exec python3 -I "$(dirname "$(readlink -f "$0")")/autorun.py" "$@"

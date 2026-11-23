@@ -1,0 +1,60 @@
+{
+ "disks": [
+  {
+   "name": "sda",
+   "path": "/dev/sda",
+   "size": 1000204886016,
+   "tran": "usb",
+   "serial": "NOISO0001",
+   "model": "TOSHIBA MQ04UBF100",
+   "ro": false,
+   "pttype": "gpt",
+   "ptuuid": "3b9e6c2a-71d4-4f0e-9c55-0d1e2f3a4b5c",
+   "logical_block_size": 512,
+   "gpt_backup_lba": 42995711,
+   "syspath": "/sys/devices/pci0000:00/0000:00:08.1/0000:20:00.5/usb4/4-1/4-1:1.0/host0/target0:0:0/0:0:0:0",
+   "pci": [
+    {
+     "addr": "0000:20:00.5",
+     "vendor": "0x1022",
+     "device": "0x13ed"
+    }
+   ],
+   "partitions": [
+    {
+     "name": "sda1",
+     "path": "/dev/sda1",
+     "start": 2048,
+     "sectors": 1048576,
+     "fstype": "vfat",
+     "label": "PS5LINUX",
+     "partlabel": "PS5LINUX",
+     "mountpoint": "/boot",
+     "partuuid": "aaaaaaaa-0000-4000-8000-000000000001"
+    },
+    {
+     "name": "sda2",
+     "path": "/dev/sda2",
+     "start": 1050624,
+     "sectors": 20971520,
+     "fstype": "exfat",
+     "label": "DATA",
+     "partlabel": "DATA",
+     "mountpoint": "/mnt/ps5iso",
+     "partuuid": "aaaaaaaa-0000-4000-8000-000000000002"
+    },
+    {
+     "name": "sda3",
+     "path": "/dev/sda3",
+     "start": 22022144,
+     "sectors": 20971520,
+     "fstype": "ext4",
+     "label": "ps5arch",
+     "partlabel": "ps5arch",
+     "mountpoint": "/",
+     "partuuid": "aaaaaaaa-0000-4000-8000-000000000003"
+    }
+   ]
+  }
+ ]
+}

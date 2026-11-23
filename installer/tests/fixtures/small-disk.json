@@ -1,0 +1,84 @@
+{
+ "disks": [
+  {
+   "name": "sda",
+   "path": "/dev/sda",
+   "size": 48000000000,
+   "tran": "usb",
+   "serial": "SMALL0005",
+   "model": "small SSD",
+   "ro": false,
+   "pttype": "gpt",
+   "syspath": "/sys/devices/pci0000:00/0000:00:08.1/0000:20:00.5/usb4/4-1/4-1:1.0/host0/target0:0:0/0:0:0:0",
+   "pci": [
+    {
+     "addr": "0000:20:00.5",
+     "vendor": "0x1022",
+     "device": "0x13ed"
+    },
+    {
+     "addr": "0000:00:08.1",
+     "vendor": "0x1022",
+     "device": "0x1449"
+    }
+   ],
+   "partitions": [
+    {
+     "name": "sda1",
+     "path": "/dev/sda1",
+     "start": 2048,
+     "sectors": 2097152,
+     "fstype": "vfat",
+     "label": "boot",
+     "partlabel": "boot",
+     "mountpoint": "/boot"
+    },
+    {
+     "name": "sda2",
+     "path": "/dev/sda2",
+     "start": 2099200,
+     "sectors": 33554432,
+     "fstype": "ext4",
+     "label": "root",
+     "partlabel": "root",
+     "mountpoint": "/"
+    }
+   ],
+   "ptuuid": "5d1f0f6a-8a5e-4c55-9b0e-2b1c7f3e0a11"
+  },
+  {
+   "name": "sdc",
+   "path": "/dev/sdc",
+   "size": 61530439680,
+   "tran": "usb",
+   "serial": "ISOSTICK0003",
+   "model": "SanDisk Ultra",
+   "ro": false,
+   "pttype": "dos",
+   "syspath": "/sys/devices/pci0000:00/0000:00:08.1/0000:20:00.4/usb4/4-1/4-1:1.0/host0/target0:0:0/0:0:0:0",
+   "pci": [
+    {
+     "addr": "0000:20:00.4",
+     "vendor": "0x1022",
+     "device": "0x13ed"
+    },
+    {
+     "addr": "0000:00:08.1",
+     "vendor": "0x1022",
+     "device": "0x1449"
+    }
+   ],
+   "partitions": [
+    {
+     "name": "sdc1",
+     "path": "/dev/sdc1",
+     "start": 2048,
+     "sectors": 119537664,
+     "fstype": "exfat",
+     "label": "WINISO",
+     "mountpoint": null
+    }
+   ]
+  }
+ ]
+}

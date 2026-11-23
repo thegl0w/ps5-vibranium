@@ -1,0 +1,36 @@
+# PS5 Windows installer: optional settings.
+#
+# To use: copy this file onto the PS5ISO partition (next to your Windows ISO) and name it  ps5win-answers.txt
+# Then remove the "#" in front of each line you want to change. Lines that start with "#" are ignored, and every
+# setting has a working default, so an empty file (or no file at all) is fine.
+# Format: one  key=value  per line, no quotes.
+
+# Name of the PC on the network. 1-15 letters, digits or "-", not only digits.  Default: PS5WIN
+#computer_name=PS5WIN
+
+# Name of the Windows account (an administrator that signs in by itself). 1-20 characters, no spaces and none of
+# " / \ [ ] : ; | = , + * ? < > @   Not "Administrator" or "Guest".  Default: ps5
+#user_name=ps5
+
+# Password for that account. Default: none (signs in without one; set one later in Windows:
+# Settings > Accounts > Sign-in options). If you set it here, it sits in plain text on PS5ISO until you delete this
+# file, so setting it in Windows afterwards is the safer choice. Windows deletes its own copy after the first sign-in.
+#password=
+
+# Time zone, as a Windows time-zone ID. Default: taken from the installer's Linux clock setting, else UTC.
+# Examples: UTC, GMT Standard Time, W. Europe Standard Time, Romance Standard Time, Eastern Standard Time,
+#           Central Standard Time, Pacific Standard Time, Tokyo Standard Time, AUS Eastern Standard Time
+#time_zone=UTC
+
+# Language/region for Windows' formats and keyboard, as a language tag. Default: the ISO's language (e.g. en-US).
+#locale=en-US
+
+# Your own Windows product key (five groups of five). Default: none (Windows runs unactivated). Never share a file
+# that contains your key.
+#product_key=XXXXX-XXXXX-XXXXX-XXXXX-XXXXX
+
+# Size of the Windows partition in GiB. Default: all free space on the disk. Minimum 40, 64 or more recommended.
+#windows_gib=200
+
+# Not used here: the target disk and the install mode are always "this disk" and "add, never erase"; lines named
+# target_serial or mode are ignored.

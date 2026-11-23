@@ -1,0 +1,15 @@
+# Never commit: build outputs (hold the driver test-signing key build/ps5gpu/testkey.pem and its backups),
+# disk images, ISOs, secrets.
+build/
+*.pem
+*.key
+*.pfx
+*.pvk
+*.p12
+*.img
+*.img.xz
+*.iso
+.env
+.wifi_home
+.DS_Store
+._*

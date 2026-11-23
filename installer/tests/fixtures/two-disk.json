@@ -1,0 +1,159 @@
+{
+ "disks": [
+  {
+   "name": "sda",
+   "path": "/dev/sda",
+   "size": 240057409536,
+   "tran": "usb",
+   "serial": "LNXSSD0001",
+   "model": "Kingston SA400",
+   "ro": false,
+   "pttype": "gpt",
+   "syspath": "/sys/devices/pci0000:00/0000:00:08.1/0000:20:00.5/usb4/4-1/4-1:1.0/host0/target0:0:0/0:0:0:0",
+   "pci": [
+    {
+     "addr": "0000:20:00.5",
+     "vendor": "0x1022",
+     "device": "0x13ed"
+    },
+    {
+     "addr": "0000:00:08.1",
+     "vendor": "0x1022",
+     "device": "0x1449"
+    }
+   ],
+   "partitions": [
+    {
+     "name": "sda1",
+     "path": "/dev/sda1",
+     "start": 2048,
+     "sectors": 2097152,
+     "fstype": "vfat",
+     "label": "boot",
+     "partlabel": "boot",
+     "mountpoint": "/boot"
+    },
+    {
+     "name": "sda2",
+     "path": "/dev/sda2",
+     "start": 2099200,
+     "sectors": 209715200,
+     "fstype": "btrfs",
+     "label": "root",
+     "partlabel": "root",
+     "mountpoint": "/"
+    }
+   ],
+   "ptuuid": "5d1f0f6a-8a5e-4c55-9b0e-2b1c7f3e0a11"
+  },
+  {
+   "name": "sdb",
+   "path": "/dev/sdb",
+   "size": 1000204886016,
+   "tran": "usb",
+   "serial": "T7TARGET0002",
+   "model": "Samsung PSSD T7",
+   "ro": false,
+   "pttype": "gpt",
+   "syspath": "/sys/devices/pci0000:00/0000:00:08.1/0000:20:00.4/usb4/4-1/4-1:1.0/host0/target0:0:0/0:0:0:0",
+   "pci": [
+    {
+     "addr": "0000:20:00.4",
+     "vendor": "0x1022",
+     "device": "0x13ed"
+    },
+    {
+     "addr": "0000:00:08.1",
+     "vendor": "0x1022",
+     "device": "0x1449"
+    }
+   ],
+   "partitions": [
+    {
+     "name": "sdb1",
+     "path": "/dev/sdb1",
+     "start": 2048,
+     "sectors": 1952448512,
+     "fstype": "exfat",
+     "label": "T7",
+     "partlabel": "T7"
+    }
+   ],
+   "ptuuid": "0b6a3c2e-4f1d-4e8a-a7c2-93d5e1f60b22"
+  },
+  {
+   "name": "sdc",
+   "path": "/dev/sdc",
+   "size": 61530439680,
+   "tran": "usb",
+   "serial": "ISOSTICK0003",
+   "model": "SanDisk Ultra",
+   "ro": false,
+   "pttype": "dos",
+   "syspath": "/sys/devices/pci0000:00/0000:00:08.1/0000:20:00.4/usb4/4-1/4-1:1.0/host0/target0:0:0/0:0:0:0",
+   "pci": [
+    {
+     "addr": "0000:20:00.4",
+     "vendor": "0x1022",
+     "device": "0x13ed"
+    },
+    {
+     "addr": "0000:00:08.1",
+     "vendor": "0x1022",
+     "device": "0x1449"
+    }
+   ],
+   "partitions": [
+    {
+     "name": "sdc1",
+     "path": "/dev/sdc1",
+     "start": 2048,
+     "sectors": 119537664,
+     "fstype": "exfat",
+     "label": "WINISO",
+     "mountpoint": null
+    }
+   ]
+  },
+  {
+   "name": "nvme0n1",
+   "path": "/dev/nvme0n1",
+   "size": 1000204886016,
+   "tran": "nvme",
+   "serial": "SONYINTERNAL",
+   "model": "Sony internal",
+   "ro": false,
+   "pttype": "gpt",
+   "syspath": "/sys/devices/pci0000:00/0000:00:01.1/0000:40:00.0/nvme/nvme0",
+   "pci": [
+    {
+     "addr": "0000:40:00.0",
+     "vendor": "0x104d",
+     "device": "0x90eb"
+    }
+   ],
+   "partitions": [],
+   "ptuuid": "7c2e9d41-1a3b-4c5d-8e6f-a0b1c2d3e433"
+  },
+  {
+   "name": "sdx",
+   "path": "/dev/sdx",
+   "size": 1000204886016,
+   "tran": "usb",
+   "serial": "DISGUISED",
+   "model": "Sony internal",
+   "ro": false,
+   "pttype": "gpt",
+   "syspath": "/sys/devices/pci0000:00/0000:00:01.1/0000:40:00.0/nvme/nvme0",
+   "pci": [
+    {
+     "addr": "0000:40:00.0",
+     "vendor": "0x104d",
+     "device": "0x90eb"
+    }
+   ],
+   "partitions": [],
+   "ptuuid": "7c2e9d41-1a3b-4c5d-8e6f-a0b1c2d3e444"
+  }
+ ]
+}

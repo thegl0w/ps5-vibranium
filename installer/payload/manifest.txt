@@ -1,0 +1,81 @@
+# What the installer puts under C:\ps5 on the new Windows, and where each file is built in this repo.
+# Format: <path under C:\ps5> | <source, relative to windows-handoff/> | <kind>
+# Release: the Ethernet driver (eth\) and ps5gpu2.exe are the clean-room MIT builds (windows-handoff/cleanroom/),
+# proven on the console in run 5 (2026-11-22); no GPL or non-commercial parts are shipped.
+# kind: driver (kernel binary: PE checks), signed-cat, file, script (CRLF enforced), generated (made by build_payload.py)
+# Not listed on purpose: GPU microcode (gpu\fw\cyan_skillfish2_*.bin: copied at install time from the Linux image's
+# /usr/lib/firmware/amdgpu, see DESIGN 2.5), p5bd (crashes), test programs, dev tasks, the ssh key, dgVoodoo2,
+# and the Wi-Fi driver p5net (its MT7921 core carries recorded join frames of the user's own networks; a scanning
+# Wi-Fi driver configured inside Windows replaces it later). build_payload.py refuses any file holding those details.
+
+gpu\ps5gpu.sys                 | build/ps5gpu/ps5gpu.sys                                              | driver
+gpu\ps5gpu.exe                 | build/ps5gpu/ps5gpu.exe                                              | file
+gpu\ps5gpu2.exe                | build/cleanroom-ps5gpu2/ps5gpu2.exe                                  | file
+gpu\start.cmd                  | ps5gpu/win/start.cmd                                                 | script
+# autostart.cmd pinned to the r8 release version (sha256 1fadf108… as staged): the live ps5gpu/win/autostart.cmd
+# calls gpu-bootstart.cmd (ps5wddm boot-time GPU start), parked until a fair console retest (GPU session, 2026-11-22)
+gpu\autostart.cmd              | installer/payload/pinned/autostart.cmd                               | script
+gpu\wddm-mode.cmd              | ps5gpu/win/wddm-mode.cmd                                             | script
+gpu\gdi-mode.cmd               | ps5gpu/win/gdi-mode.cmd                                              | script
+gpu\gpu-recover.cmd            | ps5gpu/win/gpu-recover.cmd                                           | script
+# display driver: build 0.3.1122.4977 (build/ps5gpu/wddm-boot, sys e6cbca2e): the driver the dev box ran since
+# 2026-11-22 (incl. the no-blink boot-time start, which stays off unless gpu-bootstart.cmd arms it; release
+# autostart.cmd above does not). Built from the published ps5gpu/wddm source: a rebuild on 2026-11-23 differs only
+# in time stamps / checksum / PDB id (.text .data PAGE identical). Catalog made by New-FileCatalog (sorted).
+# Replaces the r7 60 Hz build (0.3.1121.32982), whose exact source was not kept. Refresh rate: the launcher caps it.
+gpu\wddm\ps5wddm.sys           | build/ps5gpu/wddm-boot/ps5wddm.sys                                  | driver
+gpu\wddm\ps5wddm.inf           | build/ps5gpu/wddm-boot/ps5wddm.inf                                  | file
+gpu\wddm\ps5wddm.cat           | build/ps5gpu/wddm-boot/ps5wddm.cat                                  | signed-cat
+gpu\wddm\ps5test.cer           | build/ps5gpu/wddm-boot/ps5test.cer                                    | file
+gpu\d3d10\libgallium_d3d10.dll | build/gpusrc/mesa-build-zink/src/gallium/targets/d3d10umd/libgallium_d3d10.dll | file
+gpu\vk\vulkan_radeon.dll       | build/gpusrc/mesa-build-ps5/src/amd/vulkan/vulkan_radeon.dll         | file
+# libwinpthread-1.dll: vulkan_radeon.dll (both) and libgallium_wgl.dll import it and a clean Windows has none. Without
+# it the Vulkan driver cannot load, the Direct3D driver gets no screen, dwm.exe aborts and Windows stops the display
+# adapter: the 19044.1288 release blocker of 2026-11-22/23 (the dev install had the file from manual set-up).
+gpu\vk\libwinpthread-1.dll     | build/winpthreads/x64/libwinpthread-1.dll                            | file
+gpu\vk\ps5_icd.json            | ps5gpu/win/vkreg/ps5_icd.json                                        | file
+gpu\vk32\vulkan_radeon.dll     | build/gpusrc/mesa-build-ps5-32/src/amd/vulkan/vulkan_radeon.dll      | file
+gpu\vk32\libwinpthread-1.dll   | build/winpthreads/x86/libwinpthread-1.dll                            | file
+gpu\vk32\ps5_icd.json          | ps5gpu/win/vkreg/ps5_icd.json                                        | file
+gpu\vkreg\vulkan-1.x64.dll     | build/dl-vk/loader-build/loader/vulkan-1.dll                         | file
+gpu\vkreg\vulkan-1.x86.dll     | build/dl-vk/loader-build32/loader/vulkan-1.dll                       | file
+gpu\vkreg\ps5_icd.json         | ps5gpu/win/vkreg/ps5_icd.json                                        | file
+gpu\vkreg\vk-install.cmd       | ps5gpu/win/vkreg/vk-install.cmd                                      | script
+gpu\d3d\d3d8.dll               | build/dl-vk/dxvk/dxvk-3.1.1/x64/d3d8.dll                             | file
+gpu\d3d\d3d9.dll               | build/dl-vk/dxvk/dxvk-3.1.1/x64/d3d9.dll                             | file
+gpu\d3d\d3d10core.dll          | build/dl-vk/dxvk/dxvk-3.1.1/x64/d3d10core.dll                        | file
+gpu\d3d\d3d11.dll              | build/dl-vk/dxvk/dxvk-3.1.1/x64/d3d11.dll                            | file
+gpu\d3d\dxgi.dll               | build/dl-vk/dxvk/dxvk-3.1.1/x64/dxgi.dll                             | file
+gpu\d3d\d3d12.dll              | build/dl-d3d12/x/vkd3d-proton-3.1/x64/d3d12.dll                      | file
+gpu\d3d\d3d12core.dll          | build/dl-d3d12/x/vkd3d-proton-3.1/x64/d3d12core.dll                  | file
+gpu\d3d32\d3d8.dll             | build/dl-vk/dxvk/dxvk-3.1.1/x32/d3d8.dll                             | file
+gpu\d3d32\d3d9.dll             | build/dl-vk/dxvk/dxvk-3.1.1/x32/d3d9.dll                             | file
+gpu\d3d32\d3d10core.dll        | build/dl-vk/dxvk/dxvk-3.1.1/x32/d3d10core.dll                        | file
+gpu\d3d32\d3d11.dll            | build/dl-vk/dxvk/dxvk-3.1.1/x32/d3d11.dll                            | file
+gpu\d3d32\dxgi.dll             | build/dl-vk/dxvk/dxvk-3.1.1/x32/dxgi.dll                             | file
+gpu\d3d32\d3d12.dll            | build/dl-d3d12/x/vkd3d-proton-3.1/x86/d3d12.dll                      | file
+gpu\d3d32\d3d12core.dll        | build/dl-d3d12/x/vkd3d-proton-3.1/x86/d3d12core.dll                  | file
+gpu\gl\opengl32.dll            | build/glpkg/opengl32.dll                                             | file
+gpu\gl\libgallium_wgl.dll      | build/glpkg/libgallium_wgl.dll                                       | file
+gpu\gl\libwinpthread-1.dll     | build/winpthreads/x64/libwinpthread-1.dll                            | file
+gpu\kit\ps5-gamekit.ps1        | ps5gpu/win/kit/ps5-gamekit.ps1                                       | script
+gpu\kit\kit-install.cmd        | ps5gpu/win/kit/kit-install.cmd                                       | script
+gpu\kit\kit-install.ps1        | ps5gpu/win/kit/kit-install.ps1                                       | script
+gpu\kit\kit-menu.ps1           | ps5gpu/win/kit/kit-menu.ps1                                          | script
+eth\p5eth.sys                  | build/cleanroom-p5eth/p5eth.sys                                      | driver
+eth\p5eth.inf                  | build/cleanroom-p5eth/p5eth.inf                                      | file
+eth\p5eth.cat                  | build/cleanroom-p5eth/p5eth.cat                                      | signed-cat
+eth\devadd.exe                 | build/ps5wifi/devadd.exe                                             | file
+ps5therm.exe                   | build/ps5therm/ps5therm.exe                                          | file
+ps5guard.cmd                   | winremote/ps5guard.cmd                                               | script
+setup\ps5-setup.cmd            | installer/payload/setup/ps5-setup.cmd                                | script
+setup\wu-tasks-off.ps1         | installer/payload/setup/wu-tasks-off.ps1                             | script
+setup\wu-tasks-system.cmd      | installer/payload/setup/wu-tasks-system.cmd                          | script
+setup\security-report.ps1      | installer/payload/setup/security-report.ps1                          | script
+setup\gamebar-off.ps1          | ps5gpu/win/setup/gamebar-off.ps1                                     | script
+setup\shader-cache-dirs.ps1    | ps5gpu/win/setup/shader-cache-dirs.ps1                               | script
+setup\SetupComplete.cmd        | installer/payload/setup/SetupComplete.cmd                            | script
+firstlogon.cmd                 | installer/payload/setup/firstlogon.cmd                               | script
+setup\readme-first.txt         | installer/payload/setup/readme-first.txt                             | script
+setup\tasks\ps5-gpu-autostart.xml | -                                                                 | generated
+setup\tasks\ps5-guard.xml      | -                                                                    | generated
