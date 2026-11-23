@@ -111,6 +111,10 @@ Check a download with `minisign -V -P RWTZPJHamtTC2i/7gqe8aeGcdAw57C0um+zEmx4Qkm
 
 **Once you reach the desktop the first time, restart one more time** (Start → Restart, then start the PS5 Linux loader again). Audio and the full GPU driver only come up from that second start on; on the first desktop, sound may show a red cross and Display Settings may say "Microsoft Basic Display Adapter". That's expected. On the second start, shortly after the desktop appears, a green rectangle shows briefly near the top left (the GPU checking that it can draw) and then the screen goes black once for about a second: that is the switch to the full GPU driver. After it, Display Settings → Advanced display says "PS5 GPU (ps5wddm)".
 
+**Then set a password.** Windows signs in to the `ps5` account automatically, with no password. Once the full GPU
+driver is up (the second start above), press Ctrl+Alt+Del → *Change a password* and set one (leave "Old password"
+empty). After that, Windows asks for it at each start instead of signing in by itself.
+
 On every later start: start the PS5 Linux loader, and Windows comes up after a 10-second countdown. Press any key to stay in Linux.
 
 ### Optional: answer file

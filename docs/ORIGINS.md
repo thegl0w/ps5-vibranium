@@ -11,7 +11,7 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `.gitignore` | `c7664b5b36551b63` | ours | MIT | - |
 | `CONTRIBUTING.md` | `4673b86b6ac87a23` | ours | MIT | - |
 | `LICENSE` | `aab31633bff4a0be` | ours (the MIT text of release/LICENSE) | MIT | - |
-| `README.md` | `d4dddc2e9a7a97e8` | ours | MIT | - |
+| `README.md` | `ceb9aba16e75a07e` | ours | MIT | - |
 | `SECURITY.md` | `53dcddeedf3ed5b5` | ours | MIT | - |
 | `cleanroom/directload-mit/CyanDirectLoad.cpp` | `1b62e949ae61539f` | clean-room rewrite from cleanroom/spec-directload.md (replaces MetalCyan's CyanDirectLoad) | MIT | MetalCyan:MetalCyan/CyanDirectLoad.cpp (1 runs, longest 4 lines) |
 | `cleanroom/directload-mit/CyanDirectLoad.hpp` | `d2e555f6a333a229` | clean-room rewrite from cleanroom/spec-directload.md (replaces MetalCyan's CyanDirectLoad) | MIT | MetalCyan:MetalCyan/CyanDirectLoad.hpp (24 runs, longest 15 lines) |
