@@ -2,6 +2,9 @@
 
 > **Beta.** This is the first public release. Expect rough edges, and please report what you find.
 
+> **Built with AI assistance.** Much of the code and documentation was written with Claude (Claude Code), directed,
+> reviewed and tested on real hardware by the author.
+
 ps5win installs **Windows 10 IoT Enterprise LTSC 2021** on a launch-model PS5 and runs it bare metal from a USB drive.
 Its own GPU driver gives Windows a GPU-accelerated desktop, Vulkan, and Direct3D 9 to 12 games through DXVK and
 vkd3d-proton.
@@ -227,7 +230,7 @@ our patches are linked here.
 | DXVK 3.1.1 | zlib | game kit | unmodified upstream release (DLLs byte-identical); [v3.1.1 source](https://github.com/doitsujin/dxvk/tree/v3.1.1), licence in `release/licenses/` |
 | vkd3d-proton 3.1 | LGPL-2.1-or-later | game kit | unmodified upstream release (DLLs byte-identical); [v3.1 source](https://github.com/HansKristian-Work/vkd3d-proton/tree/v3.1) (a source tarball with all submodules is attached to the release), COPYING/AUTHORS in `release/licenses/` |
 
-Our own code: MIT (planned; every file carries an SPDX header). Three parts that first followed code under other
+Our own code: MIT (see `LICENSE`; every file carries an SPDX header). Three parts that first followed code under other
 licences were rewritten clean-room from written hardware descriptions and are MIT too: the Ethernet driver (was
 GPL-2.0), the firmware's restart/shutdown library and the GPU microcode loader. A clone detector compared every shipped source file with MetalCyan, ps5-hackintosh, Linux's amdgpu driver, the ps5-linux kernel patch and the GPL code we used; the results and their explanations are in `docs/CLEANROOM.md`. Licence texts:
 `release/licenses/`.
@@ -239,6 +242,8 @@ same GPU family on the AMD BC-250 board. ps5win is a separate project with its o
 PS5 itself.
 
 ## Credits
+
+Made by the gl0w (Hasham Tariq).
 
 Credits required by the licences of code ps5win uses or ships:
 
