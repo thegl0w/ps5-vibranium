@@ -70,6 +70,11 @@ Enterprise LTSC 2021.
 - **Edge** runs with GPU acceleration switched off by the installer (a policy, so Edge says "managed by your
   organization"). With acceleration on, Edge flashes bright white over and over: **photosensitivity warning**,
   don't switch it back on. Other browsers may do the same with GPU acceleration on; turn it off in their settings.
+- **Steam** (and other launchers built on a browser engine) has GPU acceleration on by default, and its window draws
+  wrong on this driver. Turn it off once: Steam → Settings → Interface → untick "Enable GPU accelerated rendering in
+  web views", then restart Steam. If the window is too broken to reach Settings, start Steam once with
+  `steam.exe -cef-disable-gpu` (for example from Win+R with the full path to steam.exe), then change the setting.
+  Games themselves are not affected by this setting.
 
 ## Requirements
 
