@@ -1,0 +1,12 @@
+--- a/subprojects/dxil-spirv/opcodes/dxil/dxil_arithmetic.cpp.orig	2026-11-23 15:19:19
++++ b/subprojects/dxil-spirv/opcodes/dxil/dxil_arithmetic.cpp	2026-11-23 15:19:19
+@@ -572,7 +572,8 @@
+ 	spv::Id id0 = impl.get_id_for_value(instruction->getOperand(1));
+ 	spv::Id id1 = impl.get_id_for_value(instruction->getOperand(2));
+ 
+-	spv::Id type_id = impl.get_type_id(instruction->getType());
++	// ps5: the result type is the two-output struct (%dx.types.twoi32); the helpers work on one uint each.
++	spv::Id type_id = builder.makeUintType(32);
+ 	spv::Id quot_id = impl.spirv_module.get_helper_call_id(HelperCall::UDiv, type_id);
+ 	spv::Id rem_id = impl.spirv_module.get_helper_call_id(HelperCall::UMod, type_id);
+ 

@@ -14,6 +14,12 @@ FLAG_COMPRESS = {0x00020000: "XPRESS", 0x00040000: "LZX", 0x00080000: "LZMS"}
 # the firmware is tied to the exact ntoskrnl build, so the build numbers are part of the identity.
 TARGET = {"EDITIONID": "IoTEnterpriseS", "ARCH": "9", "MAJOR": "10", "MINOR": "0", "BUILD": "19041"}
 KNOWN_SPBUILDS = {"1288": "LTSC 2021 RTM media (ntoskrnl stub: firmware/windows_kstub-19041.1288.inc)"}
+# EXPERIMENTAL (v1.0.1): other Windows 10 2004..22H2 media (all kernel build 19041, e.g. the 22H2 ISO = 19041.2965),
+# patched by the firmware's pattern stub when check_kernel.py's four checks pass. Preference order when the answer file
+# names no edition. Not offered: Home/Core (ignores the Windows Update policies the installer sets: a kernel update
+# would leave Windows without the per-CPU fix) and the N editions (no media components).
+EDITIONS = ["IoTEnterpriseS", "EnterpriseS", "Enterprise", "Professional", "ProfessionalWorkstation", "Education",
+            "ProfessionalEducation"]
 
 
 class WimError(Exception):
@@ -85,23 +91,36 @@ def read_images(read):
     return info, images
 
 
-def pick_edition(info, images):
-    """Return (image, verdict, reasons). verdict: 'ok' (exact tested release), 'untested' (right edition, other
-    servicing build), or 'refuse'."""
+def pick_edition(info, images, want=None):
+    """Return (image, verdict, reasons). verdict: 'ok' (the tested release: IoT Enterprise LTSC 2021, 19041.1288),
+    'experimental' (another accepted edition or servicing build of kernel 19041: needs experimental=yes in the answer
+    file; the kernel check decides whether the firmware can patch it), or 'refuse'. want: the answer file's edition=
+    (an EDITIONID such as Professional, or an image name), else the first of EDITIONS present."""
     reasons = []
     if info["total_parts"] != 1:
         return None, "refuse", ["split WIM (.swm): copy the original ISO instead"]
-    hits = [i for i in images if all(i.get(k) == v for k, v in TARGET.items())]
+    base = {k: v for k, v in TARGET.items() if k != "EDITIONID"}
+    fits = [i for i in images if all(i.get(k) == v for k, v in base.items()) and i.get("EDITIONID") in EDITIONS]
+    if want:
+        w = want.strip().lower()
+        hits = [i for i in fits if (i.get("EDITIONID") or "").lower() == w or (i.get("name") or "").lower() == w]
+        if not hits:
+            have = ", ".join(sorted({i["EDITIONID"] for i in fits})) or "none"
+            return None, "refuse", [f"edition={want} from the answer file is not in this file (usable here: {have})"]
+    else:
+        hits = sorted(fits, key=lambda i: EDITIONS.index(i["EDITIONID"]))
     if not hits:
         found = ", ".join(f"{i['index']}: {i['EDITIONID'] or i['name']} (arch {i['ARCH']}, build {i['BUILD']})"
                           for i in images) or "no images"
-        return None, "refuse", [f"no Windows 10 IoT Enterprise LTSC x64 image in this file ({found})"]
-    if len(hits) > 1:
-        reasons.append(f"{len(hits)} matching images; taking the first (index {hits[0]['index']})")
+        return None, "refuse", ["no usable Windows 10 x64 edition in this file (IoT Enterprise LTSC, Enterprise, "
+                                f"Pro, Education; Home and N editions are not supported) ({found})"]
     img = hits[0]
-    if img["SPBUILD"] in KNOWN_SPBUILDS:
+    if len([i for i in hits if i["EDITIONID"] == img["EDITIONID"]]) > 1:
+        reasons.append(f"several {img['EDITIONID']} images; taking the first (index {img['index']})")
+    if img["EDITIONID"] == TARGET["EDITIONID"] and img["SPBUILD"] in KNOWN_SPBUILDS:
         reasons.append(f"build 10.0.{img['BUILD']}.{img['SPBUILD']}: {KNOWN_SPBUILDS[img['SPBUILD']]}")
         return img, "ok", reasons
-    reasons.append(f"build 10.0.{img['BUILD']}.{img['SPBUILD']} has no kernel stub in the firmware yet: "
-                   "Windows would boot without the per-CPU fix (see installer/DESIGN.md, kernel stub)")
-    return img, "untested", reasons
+    reasons.append(f"EXPERIMENTAL: {img['name']} ({img['EDITIONID']}) 10.0.{img['BUILD']}.{img['SPBUILD']} is not "
+                   "the tested release (IoT Enterprise LTSC 2021, 19041.1288); it needs experimental=yes in "
+                   "ps5win-answers.txt, and the firmware's pattern stub must fit its kernel (kernel check)")
+    return img, "experimental", reasons

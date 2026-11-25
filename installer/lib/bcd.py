@@ -102,7 +102,7 @@ def osloader_objects(o):
         E["nx"]: 0, E["bootmenupolicy"]: 1,
         E["bootstatuspolicy"]: 1,             # IgnoreAllFailures (as on the Toshiba and today's SSD)
         E["testsigning"]: True,               # our drivers are test-signed
-        E["nocrashautoreboot"]: True,         # keep a stop screen on screen
+        # no nocrashautoreboot (1.1): a stop error restarts by itself and the warm restart loops back into Windows
     }
     if o.get("firmware_pci", True):
         loader[E["usefirmwarepcisettings"]] = True

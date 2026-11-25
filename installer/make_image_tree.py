@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Assemble /opt/ps5win/installer/ for the Toshiba installer image (windows-handoff/image/, the image session's).
 
-Usage: make_image_tree.py OUTDIR [--package build/boot40] [--frozen PAYLOAD.json] [--clean]
+Usage: make_image_tree.py OUTDIR [--package build/boot48] [--frozen PAYLOAD.json] [--clean]
   OUTDIR/installer/   autorun (entry point), autorun.py, install.py and the tools it calls, lib/, deny.txt,
                       kstub-table.txt (from the launch package the image ships, so the kernel check and the firmware
                       agree), payload/ (build_payload.py: the C:\\ps5 tree, hash-checked), TREE.txt (what went in)
@@ -28,13 +28,13 @@ BAD_BUNDLES = {
 }
 FILES = ["ps5win-answers.example.txt", "autorun", "autorun.py", "install.py", "find_iso.py", "plan_layout.py", "check_kernel.py", "offline_reg.py",
          "make_unattend.py", "make_bcd.py", "lib/udf.py", "lib/wim.py", "lib/wimapi.py", "lib/hive.py", "lib/bcd.py",
-         "lib/writer.py"]
+         "lib/writer.py", "lib/kpattern.py"]
 
 
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("outdir")
-    ap.add_argument("--package", default=str(WH / "build/boot40"))
+    ap.add_argument("--package", default=str(WH / "build/boot48"))
     ap.add_argument("--frozen")
     ap.add_argument("--clean", action="store_true")
     a = ap.parse_args()

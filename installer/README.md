@@ -43,8 +43,8 @@ time zone, locale, product key, Windows partition size), all commented out with 
   modified graphics files can get accounts banned. The game kit skips such games. The installer's countdown screen
   and `READ ME FIRST.txt` on the desktop say so too.
 - **Ethernet:** connect the cable before starting Windows; plugging it in later is not picked up yet (no hot-plug).
-- **PS5 OS** says the console "wasn't turned off properly" after a Windows session: expected (Windows' restart and
-  shut-down go through the console's own reset path, not PS5 OS).
+- The console says it "wasn't turned off properly" after a Windows session: expected (Windows' shut-down goes
+  through the console's power controller directly, not the console's own shutdown).
 - **HDMI audio** works from the first restart on (its interrupt setting applies at the next boot).
 - `C:\ps5\security-report.txt` (written at the first start) shows what the install exposes: accounts, listening
   ports, firewall, Remote Desktop, SSH, file sharing, Defender and update status.

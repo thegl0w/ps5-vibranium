@@ -13,8 +13,9 @@
 #user_name=ps5
 
 # Password for that account. Default: none (signs in without one; set one later in Windows:
-# Settings > Accounts > Sign-in options). If you set it here, it sits in plain text on PS5ISO until you delete this
-# file, so setting it in Windows afterwards is the safer choice. Windows deletes its own copy after the first sign-in.
+# Settings > Accounts > Sign-in options). If you set it here, it is in plain text on PS5ISO until the install
+# succeeds; then the installer blanks this line. If the install stops with an error, delete this file yourself.
+# Setting it in Windows afterwards is the safer choice. Windows deletes its own copy after the first sign-in.
 #password=
 
 # Time zone, as a Windows time-zone ID. Default: taken from the installer's Linux clock setting, else UTC.
@@ -31,6 +32,18 @@
 
 # Size of the Windows partition in GiB. Default: all free space on the disk. Minimum 40, 64 or more recommended.
 #windows_gib=200
+
+# EXPERIMENTAL: other Windows 10 media (e.g. Microsoft's Windows 10 22H2 ISO) instead of the tested IoT Enterprise
+# LTSC 2021 ISO. The installer refuses them unless this line is uncommented. The firmware then patches their kernel by
+# pattern (not tested on a console yet). Not supported: Home and N editions. Windows Update stays off.
+#experimental=yes
+
+# Which edition to install from a multi-edition ISO, by its edition ID (Professional, Education, Enterprise,
+# ProfessionalWorkstation, ProfessionalEducation) or its full name. Default: IoT Enterprise LTSC, else Enterprise LTSC,
+# Enterprise, Pro, Pro for Workstations, Education, Pro Education (the first one in the ISO). Without product_key= the
+# non-LTSC editions get Microsoft's public KMS client setup key, which picks the edition but does NOT activate
+# Windows: activating needs your own licence.
+#edition=Professional
 
 # Not used here: the target disk and the install mode are always "this disk" and "add, never erase"; lines named
 # target_serial or mode are ignored.

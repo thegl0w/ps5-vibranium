@@ -94,6 +94,7 @@ struct Device {
     struct Work* queue;                  // kQueue entries, a ring
     ULONG queueHead, queueTail;
     volatile LONG lastSubmitted, lastCompleted;
+    volatile LONG lastCompleted1;        // 2.0 two-node test: node 1's last completed fence
     LONG allocs, devices, contexts;
     ULONG presents3, blts, fills, flips, renders, vsyncs, copies, preempts, dropped;
     ULONG renderKms, gdiOps[8], gdiSkips, gdiNoTicket, apMaps, apUnmaps, apFails;
@@ -116,6 +117,9 @@ static void ReleaseVram(Device* d);
 static void FlipTo(Device* d, ULONGLONG phys);
 static void ShowFrameBuffer(Device* d);
 static void LogF(const char* fmt, ...);
+static void W2Summary();                 // WDDM 2.0 mode: counters line (defined with the 2.0 entry points)
+static void W2DoFence(Device* d, const struct Op* op);   // ... and the CPU-written fence value
+static void W2DoCopy(Device* d, const struct Op* op);    // ... and a CPU copy between two GPU virtual ranges
 static BOOLEAN gBootStarted;             // this load of the driver started the GPU itself in DriverEntry (full mode follows)
 static void BootSettle(BOOLEAN trusted, const char* why);
 
@@ -124,6 +128,7 @@ static BOOLEAN gFull;                    // registered as a full graphics driver
 static ULONG gGdi;                       // CDD/DWM interop: GDI surfaces in the segment, drawn by Windows on the CPU (volatile Session\GdiInterop: 1 on, 3 on without software device bitmaps)
 static ULONG gGdiTexCpu = 1;             // GDI TEXTURE surfaces CPU-visible (Session\GdiTexCpu, default 1)
 static ULONG gGdiAccel;                  // kernel-mode GDI acceleration (RenderKm, GDI surfaces, aperture segment); volatile Session\GdiAccel while tested
+static BOOLEAN gTwoNodes;                // 2.0 (Session\NodeGpuMmu=1): node 0 = 3D, physical, paging (as one-node mode); node 1 = 3D with GPU MMU (virtual contexts)
 static BOOLEAN gWddm2;                   // ... as WDDM 2.0 instead of 1.3 (registry value FullVersion=20; crashed the console 2026-11-20)
 static WCHAR gRegPathBuf[260];
 
@@ -838,6 +843,9 @@ static NTSTATUS APIENTRY DdiEnumVidPnCofuncModality(IN_CONST_HANDLE context, IN_
             !(arg->EnumPivotType == D3DKMDT_EPT_ROTATION && arg->EnumPivot.VidPnSourceId == path->VidPnSourceId && arg->EnumPivot.VidPnTargetId == path->VidPnTargetId)) {
             RtlZeroMemory(&update.ContentTransformation.RotationSupport, sizeof update.ContentTransformation.RotationSupport);
             update.ContentTransformation.RotationSupport.Identity = 1;
+            // 2.0 includes path-independent rotation (1.3 "PIR" interface): dxgkrnl then wants the offset of the
+            // identity rotation too, else bug check 113/1C in SetRotationSupport (VM, 2026-11-23).
+            if (gWddm2) update.ContentTransformation.RotationSupport.Offset0 = 1;
             changed = TRUE;
         }
         if (changed) {
@@ -1042,11 +1050,21 @@ static void LogLine(const CHAR* line, BOOLEAN toRegistry)
     SIZE_T n = 0;
     RtlStringCbLengthA(line, 200, &n);
     KIRQL now = KeGetCurrentIrql(), irql;
+#ifndef P5_VM
     if (now > DISPATCH_LEVEL) return;
+#endif
     CHAR head[24];
     SIZE_T hn = 0;
     if (!NT_SUCCESS(RtlStringCbPrintfA(head, sizeof head, "%7u %u ", (ULONG)((KeQueryInterruptTime() - gTraceT0) / 10000), (ULONG)now))) head[0] = 0;
     RtlStringCbLengthA(head, sizeof head, &hn);
+#ifdef P5_VM
+    // VM test build: every line also to QEMU's debug port (-device isa-debugcon,iobase=0x402), live and hang-proof.
+    for (SIZE_T i = 0; i < hn + n + 1; ++i) {
+        UCHAR c = i < hn ? (UCHAR)head[i] : i < hn + n ? (UCHAR)line[i - hn] : (UCHAR)'\n';
+        __asm__ volatile("outb %0, %1" : : "a"(c), "Nd"((USHORT)0x402));
+    }
+    if (now > DISPATCH_LEVEL) return;
+#endif
     ULONG target = 0;
     KeAcquireSpinLock(&gLogLock, &irql);
     if (toRegistry && gLogLen + n + 2 < sizeof gLog) {
@@ -1170,7 +1188,11 @@ static BOOLEAN FirstFew(const char* name)
 
 Tr::Tr(const char* n) : name(n), on(FALSE)
 {
+#ifdef P5_VM
+    if (!gFull) return;                  // VM build: lines above DISPATCH_LEVEL still reach the debug port
+#else
     if (!gFull || KeGetCurrentIrql() > DISPATCH_LEVEL) return;
+#endif
     BOOLEAN few = FirstFew(n);
     on = few || InterlockedIncrement(&gTraceEvents) <= kTraceAll;
     if (on) TraceF(">%s", name);
@@ -1196,7 +1218,29 @@ struct Alloc {
     PMDL mdl;
     SIZE_T pages;
     ULONGLONG apAddr;                    // ... and where in the aperture segment it sits
+    volatile ULONGLONG segAddr;          // 2.0: where Windows last put it in our memory segment (paging operations) ...
+    volatile LONG inSeg;                 // ... and whether it is there now
+    UCHAR* pic;                          // 2.0, Direct3D 12 swap-chain buffers: the last picture (P5E_WRITE), read by
+    volatile LONG picSeq;                // DWM's driver with P5E_READ (the buffer itself is not CPU-visible)
 };
+// 2.0: allocations of the Direct3D 12 driver carry a cookie in info.gpuPhys (top 16 bits 0x5035); the driver copies a
+// picture from one to another by cookie (escape P5E_COPY), which is how it reaches the shared swap-chain buffers.
+static bool IsCookie(ULONGLONG c) { return (c >> 48) == 0x5035; }
+static Alloc* volatile gCookieAllocs[512];
+static void CookieAdd(Alloc* a)
+{
+    if (!IsCookie(a->info.gpuPhys)) return;
+    for (auto& slot : gCookieAllocs) if (!InterlockedCompareExchangePointer((PVOID volatile*)&slot, a, NULL)) return;
+}
+static void CookieRemove(Alloc* a)
+{
+    for (auto& slot : gCookieAllocs) InterlockedCompareExchangePointer((PVOID volatile*)&slot, NULL, a);
+}
+static Alloc* CookieFind(ULONGLONG c)
+{
+    for (auto& slot : gCookieAllocs) { Alloc* a = slot; if (a && a->info.gpuPhys == c) return a; }
+    return NULL;
+}
 static ULONG KindOf(const Alloc* a) { return a->info.kind & 0xFF; }
 static ULONG GdiTypeOf(const Alloc* a) { return a->info.kind >> 8; }
 static ULONG BppOf(ULONG format)
@@ -1226,6 +1270,31 @@ static void UnmapAp(Alloc* a)
     a->pages = 0;
 }
 struct Resource { ULONG magic; };
+
+// ---- WDDM 2.0 mode (Session\FullVersion=20; ps5gpu/wddm/WDDM2-TABLE.md): processes, virtual contexts, page tables ----
+// Nothing in this block runs in 1.3 mode. Windows' GPU virtual address space is kept in page tables Windows asks us to
+// write (4 levels x 9 bits, 4 KB tables in system memory, entries in our own 8-byte format); no GPU reads them: the
+// real address spaces stay in p5core. Our own walker (fences, later) is their only reader.
+static const ULONGLONG kCtxMagic = 0x58544335ull;      // small on purpose: never a kernel pointer, so DevOf can tell a Ctx from the Device
+struct Ctx { ULONGLONG magic; Device* d; BOOLEAN virt; ULONG rootSeg; ULONGLONG root; ULONG rootEntries; };
+struct Proc { ULONGLONG magic; HANDLE dxgk; };
+static Device* DevOf(HANDLE h)                       // a context handle: the Device itself (1.3, physical contexts) or a Ctx
+{
+    if (gWddm2 && h && ((const Ctx*)h)->magic == kCtxMagic) return ((Ctx*)h)->d;
+    return (Device*)h;
+}
+enum { W2_PROC, W2_VCTX, W2_ROOT, W2_PTE_CALLS, W2_PTE_WRITTEN, W2_PTE_BAD, W2_TLB, W2_COPYPTE, W2_RESID, W2_CTXALLOC, W2_VXFER, W2_VFILL,
+       W2_SUBMITV, W2_SUBMITV_PAGING, W2_CLOCK, W2_OTHER, W2_N };
+static volatile LONG gW2[W2_N];
+static LONG W2Count(int i) { return InterlockedIncrement(&gW2[i]); }
+static const ULONG kPtLevels = 4, kPtBits = 9, kPtEntries = 1u << kPtBits, kVaBits = 12 + kPtLevels * kPtBits;
+// Our entry: page frame << 12 | valid (bit 0) | read-only (1) | segment (2-6) | zero page (7).
+static ULONGLONG PteFromDxgk(const DXGK_PTE* p, BOOLEAN leaf)
+{
+    if (!p->Valid) return 0;
+    ULONGLONG frame = leaf ? p->PageAddress : p->PageTableAddress;
+    return (frame << 12) | 1ull | ((ULONGLONG)p->ReadOnly << 1) | ((ULONGLONG)(p->Segment & 0x1F) << 2) | ((ULONGLONG)p->Zero << 7);
+}
 
 // ---- the segment: a range of the GPU's own memory that Windows places every allocation in ----
 static UCHAR* SegPtr(Device* d, ULONGLONG addr, ULONGLONG bytes)
@@ -1345,7 +1414,7 @@ static void ShowFrameBuffer(Device* d)
 }
 
 // ---- work handed from SubmitCommand to the engine thread ----
-enum : ULONG { OP_NOP = 0, OP_BLT = 1, OP_FILL = 2, OP_GDI = 3, OP_PAGE_IN = 10, OP_PAGE_OUT = 11, OP_PAGE_MOVE = 12, OP_PAGE_FILL = 13, OP_AP_MAP = 14, OP_AP_UNMAP = 15, OP_PREEMPT = 100 };
+enum : ULONG { OP_NOP = 0, OP_BLT = 1, OP_FILL = 2, OP_GDI = 3, OP_PAGE_IN = 10, OP_PAGE_OUT = 11, OP_PAGE_MOVE = 12, OP_PAGE_FILL = 13, OP_AP_MAP = 14, OP_AP_UNMAP = 15, OP_FENCE = 20, OP_VACOPY = 21, OP_WAITTICK = 22, OP_PREEMPT = 100 };   // OP_FENCE, OP_VACOPY, OP_WAITTICK: 2.0 mode only
 #define OP_MAGIC 0x3550504Fu             // "OPP5": private data we filled in ourselves (anything else is treated as empty)
 struct Op {                              // lives in the DMA buffer's private data
     ULONG kind, color, nrects, magic;
@@ -1360,7 +1429,7 @@ struct Op {                              // lives in the DMA buffer's private da
     ULONG ticket;                        // ... and for the engine thread: our own copy of its page numbers (TakeTicket)
     ULONGLONG bytes;                     // paging: how much
 };
-struct Work { ULONG fence, last; Op op; };
+struct Work { ULONG fence, last; Op op; ULONG node; };
 static const ULONG kQueue = 2048;
 
 // Page-number copies wait here for the engine thread. An operation only carries the ticket number, so a buffer that
@@ -1405,7 +1474,7 @@ static void WakeEngine(Device* d) { KeSetEvent(&d->engineWake, IO_NO_INCREMENT, 
 
 // The operations of one submission (n may be 0), in order. The last entry carries the completion; with nothing valid
 // to do an empty entry of kind `emptyKind` does.
-static void EnqueueOps(Device* d, ULONG fence, const Op* ops, ULONG n, ULONG emptyKind)
+static void EnqueueOpsNode(Device* d, ULONG node, ULONG fence, const Op* ops, ULONG n, ULONG emptyKind)
 {
     KIRQL irql;
     KeAcquireSpinLock(&d->queueLock, &irql);
@@ -1418,6 +1487,7 @@ static void EnqueueOps(Device* d, ULONG fence, const Op* ops, ULONG n, ULONG emp
         if (next == d->queueTail) { d->dropped++; break; }
         Work* w = &d->queue[d->queueHead];
         w->fence = fence;
+        w->node = node;
         w->last = 0;
         if (op) w->op = *op;
         else { RtlZeroMemory(&w->op, sizeof w->op); w->op.kind = emptyKind; }
@@ -1448,6 +1518,16 @@ static void Notify(Device* d, DXGKARGCB_NOTIFY_INTERRUPT_DATA* data)
     NotifyCtx n = { d, data };
     BOOLEAN ret = FALSE;
     NTSTATUS st = d->dxgk.DxgkCbSynchronizeExecution(d->dxgk.DeviceHandle, NotifySync, &n, 0, &ret);
+#ifdef P5_VM
+    // QEMU's standard VGA has no interrupt, so there is nothing to synchronize with (C0000001): notify at HIGH_LEVEL,
+    // which nothing can interrupt. VM test build only; on the PS5 the GPU's MSI makes the call above work.
+    if (!NT_SUCCESS(st)) {
+        KIRQL old;
+        KeRaiseIrql(HIGH_LEVEL, &old);
+        ret = NotifySync(&n);
+        KeLowerIrql(old);
+    }
+#endif
     if (say) TraceF("... notified (status %08X, ran %u)", (ULONG)st, (ULONG)ret);
 }
 
@@ -1881,6 +1961,136 @@ static void ShowSource(Device* d)
     d->copies++;
 }
 
+// One unit of submitted work: run its operation; the last one of a submission reports it done (or preempted).
+static void RunWork(Device* d, Work* pw)
+{
+    Work& w = *pw;
+    if (w.op.kind == OP_BLT) DoBlt(d, &w.op);
+    else if (w.op.kind == OP_FILL) DoFill(d, &w.op);
+    else if (w.op.kind == OP_GDI) {
+        GdiBlob* b = (GdiBlob*)TakeTicket(d, w.op.ticket);
+        if (b) {
+            DoGdi(d, b);
+            ExFreePoolWithTag(b, P5_TAG);
+        }
+    } else if (w.op.kind == OP_FENCE) {
+        W2DoFence(d, &w.op);
+    } else if (w.op.kind == OP_VACOPY) {
+        W2DoCopy(d, &w.op);
+    } else if (w.op.kind >= OP_PAGE_IN && w.op.kind <= OP_AP_UNMAP) {
+        PFN_NUMBER* own = TakeTicket(d, w.op.ticket);
+        w.op.mdl = NULL;                             // never Windows' list here: it may be gone by now
+        DoPage(d, &w.op, own);
+        if (own) ExFreePoolWithTag(own, P5_TAG);
+    }
+    if (!w.last) return;
+    DXGKARGCB_NOTIFY_INTERRUPT_DATA data;
+    RtlZeroMemory(&data, sizeof data);
+    if (w.op.kind == OP_PREEMPT) {
+        data.InterruptType = DXGK_INTERRUPT_DMA_PREEMPTED;
+        data.DmaPreempted.PreemptionFenceId = w.fence;
+        data.DmaPreempted.LastCompletedFenceId = (ULONG)(w.node == 1 ? d->lastCompleted1 : d->lastCompleted);
+        data.DmaPreempted.NodeOrdinal = w.node;
+        data.DmaPreempted.EngineOrdinal = 0;
+        d->preempts++;
+    } else {
+        InterlockedExchange(w.node == 1 ? &d->lastCompleted1 : &d->lastCompleted, (LONG)w.fence);
+        data.InterruptType = DXGK_INTERRUPT_DMA_COMPLETED;
+        data.DmaCompleted.SubmissionFenceId = w.fence;
+        data.DmaCompleted.NodeOrdinal = w.node;
+        data.DmaCompleted.EngineOrdinal = 0;
+    }
+    Notify(d, &data);
+}
+
+// ---- 2.0: the kernel wait op (Direct3D 12 queues) ----
+// ps5d3d12.dll runs a queue's work on vkd3d-proton, which the queue's kernel context knows nothing of. After each
+// ExecuteCommandLists it submits OP_WAITTICK {key = its queue, value = tick} on that context and goes on; when
+// vkd3d-proton's work up to the tick is done it says so (escape P5E_TICK). Until then this node's later work (and so
+// every Windows fence signal queued behind it on that context) stays parked here. Safety: a wait gives up after
+// 1 s; a preemption or a reset drops the parked work (Windows resubmits what was not completed).
+struct TickSlot { ULONGLONG key; ULONGLONG done; };
+static TickSlot gTicks[64];
+static KSPIN_LOCK gTickLock;                 // zero = unlocked
+static ULONG gTickNext;
+static volatile LONG gParkDrop;              // set by a reset: the engine drops parked work
+static Work* gPark[2];                       // per node: a ring of kPark entries
+static ULONG gParkHead[2], gParkCount[2];
+static LONGLONG gParkSince[2];               // when the head wait started waiting
+static ULONG gParkTimeouts, gParkWaits, gParkDropped;
+static const ULONG kPark = 512;
+static void TickSet(ULONGLONG key, ULONGLONG v)
+{
+    KIRQL irql;
+    KeAcquireSpinLock(&gTickLock, &irql);
+    TickSlot* t = NULL;
+    for (ULONG i = 0; i < 64 && !t; ++i) if (gTicks[i].key == key) t = &gTicks[i];
+    if (!t) { t = &gTicks[gTickNext++ % 64]; t->key = key; t->done = 0; }
+    if (v > t->done) t->done = v;
+    KeReleaseSpinLock(&gTickLock, irql);
+}
+static BOOLEAN TickReached(ULONGLONG key, ULONGLONG v)
+{
+    KIRQL irql;
+    BOOLEAN r = FALSE;
+    KeAcquireSpinLock(&gTickLock, &irql);
+    for (ULONG i = 0; i < 64; ++i) if (gTicks[i].key == key) { r = gTicks[i].done >= v; break; }
+    KeReleaseSpinLock(&gTickLock, irql);
+    return r;
+}
+static void W2ParkInit()
+{
+    for (int n = 0; n < 2; ++n)
+        if (!gPark[n]) gPark[n] = (Work*)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(Work) * kPark, P5_TAG);
+    TraceF("kernel wait op: park lists %s", gPark[0] && gPark[1] ? "ready" : "NOT allocated (waits complete at once)");
+}
+static void W2DropParked(ULONG node, const char* why)
+{
+    if (gParkCount[node]) {
+        gParkDropped += gParkCount[node];
+        TraceF("kernel wait op: %u parked on node %u dropped (%s)", gParkCount[node], node, why);
+    }
+    gParkCount[node] = 0;
+    gParkHead[node] = 0;
+}
+// TRUE: the work was parked (it runs later, in order).
+static BOOLEAN W2Park(Device* d, Work* w)
+{
+    ULONG n = w->node & 1;
+    if (!gPark[n]) return FALSE;
+    if (w->op.kind == OP_PREEMPT) { W2DropParked(n, "preemption"); return FALSE; }
+    BOOLEAN waits = w->op.kind == OP_WAITTICK && !TickReached(w->op.dstAddr, w->op.bytes);
+    if (!gParkCount[n] && !waits) return FALSE;
+    if (gParkCount[n] == kPark) {            // full: let the head go, run everything parked, then this one
+        TraceF("kernel wait op: park list of node %u full, released", n);
+        while (gParkCount[n]) { Work* h = &gPark[n][gParkHead[n]]; gParkHead[n] = (gParkHead[n] + 1) % kPark; gParkCount[n]--; RunWork(d, h); }
+        return FALSE;
+    }
+    if (!gParkCount[n]) { gParkSince[n] = KeQueryPerformanceCounter(NULL).QuadPart; gParkWaits++; }
+    gPark[n][(gParkHead[n] + gParkCount[n]) % kPark] = *w;
+    gParkCount[n]++;
+    return TRUE;
+}
+static void W2RunParked(Device* d)
+{
+    if (InterlockedExchange(&gParkDrop, 0)) { W2DropParked(0, "reset"); W2DropParked(1, "reset"); }
+    for (ULONG n = 0; n < 2; ++n) {
+        while (gParkCount[n]) {
+            Work* h = &gPark[n][gParkHead[n]];
+            if (h->op.kind == OP_WAITTICK && !TickReached(h->op.dstAddr, h->op.bytes)) {
+                LARGE_INTEGER f;
+                LONGLONG now = KeQueryPerformanceCounter(&f).QuadPart;
+                if (now - gParkSince[n] < f.QuadPart) break;                  // keeps waiting (up to 1 s)
+                if (++gParkTimeouts <= 20) TraceF("kernel wait op: key %I64X tick %I64u not done after 1 s, released", h->op.dstAddr, h->op.bytes);
+            }
+            gParkHead[n] = (gParkHead[n] + 1) % kPark;
+            gParkCount[n]--;
+            RunWork(d, h);
+            if (gParkCount[n]) gParkSince[n] = KeQueryPerformanceCounter(NULL).QuadPart;
+        }
+    }
+}
+
 // ---- the engine thread: submitted work in order, and the 60 Hz tick ----
 static VOID EngineThread(PVOID context)
 {
@@ -1892,9 +2102,12 @@ static VOID EngineThread(PVOID context)
     ExSetTimerResolution(10000, TRUE);                       // 1 ms, so the tick is not rounded to 15.6 ms
     LogF("engine start");
     static Work w;                                           // one engine thread; too big for its stack
+    if (gWddm2) W2ParkInit();
     while (d->started) {
-        // Submitted buffers, oldest first.
+        // Submitted buffers, oldest first. 2.0: a node whose kernel wait op (OP_WAITTICK) is not satisfied yet keeps
+        // its later work parked (W2Park) while the other node goes on.
         for (;;) {
+            if (gWddm2) W2RunParked(d);
             KIRQL irql;
             BOOLEAN have = FALSE;
             KeAcquireSpinLock(&d->queueLock, &irql);
@@ -1905,38 +2118,8 @@ static VOID EngineThread(PVOID context)
             }
             KeReleaseSpinLock(&d->queueLock, irql);
             if (!have) break;
-            if (w.op.kind == OP_BLT) DoBlt(d, &w.op);
-            else if (w.op.kind == OP_FILL) DoFill(d, &w.op);
-            else if (w.op.kind == OP_GDI) {
-                GdiBlob* b = (GdiBlob*)TakeTicket(d, w.op.ticket);
-                if (b) {
-                    DoGdi(d, b);
-                    ExFreePoolWithTag(b, P5_TAG);
-                }
-            } else if (w.op.kind >= OP_PAGE_IN && w.op.kind <= OP_AP_UNMAP) {
-                PFN_NUMBER* own = TakeTicket(d, w.op.ticket);
-                w.op.mdl = NULL;                             // never Windows' list here: it may be gone by now
-                DoPage(d, &w.op, own);
-                if (own) ExFreePoolWithTag(own, P5_TAG);
-            }
-            if (!w.last) continue;
-            DXGKARGCB_NOTIFY_INTERRUPT_DATA data;
-            RtlZeroMemory(&data, sizeof data);
-            if (w.op.kind == OP_PREEMPT) {
-                data.InterruptType = DXGK_INTERRUPT_DMA_PREEMPTED;
-                data.DmaPreempted.PreemptionFenceId = w.fence;
-                data.DmaPreempted.LastCompletedFenceId = (ULONG)d->lastCompleted;
-                data.DmaPreempted.NodeOrdinal = 0;
-                data.DmaPreempted.EngineOrdinal = 0;
-                d->preempts++;
-            } else {
-                InterlockedExchange(&d->lastCompleted, (LONG)w.fence);
-                data.InterruptType = DXGK_INTERRUPT_DMA_COMPLETED;
-                data.DmaCompleted.SubmissionFenceId = w.fence;
-                data.DmaCompleted.NodeOrdinal = 0;
-                data.DmaCompleted.EngineOrdinal = 0;
-            }
-            Notify(d, &data);
+            if (gWddm2 && W2Park(d, &w)) continue;
+            RunWork(d, &w);
         }
         // The tick.
         LONGLONG now = KeQueryPerformanceCounter(NULL).QuadPart;
@@ -1944,9 +2127,11 @@ static VOID EngineThread(PVOID context)
             next += period;
             if (now > next + 4 * period) next = now + period;         // we were held up: do not try to catch up
             ShowSource(d);
-            InterlockedExchange(&d->sourceChanged, 0);
+            LONG flipped = InterlockedExchange(&d->sourceChanged, 0);
             d->vsyncs++;
-            if (d->vsyncOn) {
+            // 2.0: a flip that is waiting for the vertical sync is reported as done even while Windows has the
+            // vsync interrupt off (DWM's second present waited for ever on that, VM 2026-11-23).
+            if (d->vsyncOn || (gWddm2 && flipped)) {
                 DXGKARGCB_NOTIFY_INTERRUPT_DATA data;
                 RtlZeroMemory(&data, sizeof data);
                 data.InterruptType = DXGK_INTERRUPT_CRTC_VSYNC;
@@ -1973,6 +2158,7 @@ static VOID EngineThread(PVOID context)
                     TraceF("alive: ticks %u submitted %ld completed %ld presents %u blts %u fills %u skipped %u flips %u (held %u) copies %u renders %u allocs %ld devices %ld contexts %ld | page in %u out %u move %u fill %u FAIL %u dropped %u",
                            d->vsyncs, d->lastSubmitted, d->lastCompleted, d->presents3, d->blts, d->fills, d->skipped, d->flipsDone, d->flipsHeld, d->copies, d->renders, d->allocs,
                            d->devices, d->contexts, d->pageIns, d->pageOuts, d->pageMoves, d->pageFills, d->pageFails, d->dropped);
+                if (gWddm2 && (beats <= 60 || beats % 30 == 0)) W2Summary();
                 if (gGdiAccel)
                     TraceF("gdi: renderkm %u | blt %u fill %u alpha %u stretch %u transparent %u cleartype %u | skipped %u lost %u | aperture map %u unmap %u fail %u",
                            d->renderKms, d->gdiOps[1], d->gdiOps[2], d->gdiOps[3], d->gdiOps[4], d->gdiOps[6], d->gdiOps[7], d->gdiSkips, d->gdiNoTicket, d->apMaps, d->apUnmaps, d->apFails);
@@ -2069,8 +2255,36 @@ static ULONGLONG MemoryWindowOf(Device* d, ULONGLONG address, ULONGLONG* length)
     return 0;
 }
 
+#ifdef P5_VM
+// VM test build only (ps5wddm-vm.sys, WDDM 2.0 phase 1): QEMU's standard VGA (1234:1111) stands in for the GPU. Its
+// memory BAR holds the firmware's frame buffer at the start; the segment is the rest of the BAR from the next 16 MiB
+// on (run QEMU with -device VGA,vgamem_mb=256). Segment addresses = CPU physical addresses; nothing is ever flipped.
+static BOOLEAN SetupVramVm(Device* d)
+{
+    d->fbPhys = d->fbScan = (ULONGLONG)d->disp.PhysicAddress.QuadPart;
+    ULONGLONG winLen = 0, win = MemoryWindowOf(d, d->fbPhys, &winLen);
+    ULONGLONG segOff = ((d->fbPhys - win) + d->fbBytes + 0xFFFFFFull) & ~0xFFFFFFull;
+    if (!win || winLen < segOff + 0x4000000ull) { LogF("vm vram: frame buffer %I64X, window %I64X + %I64X: too small (vgamem_mb=256?)", d->fbPhys, win, winLen); return FALSE; }
+    d->segPhys = d->segCpu = win + segOff;
+    d->segBytes = (winLen - segOff) & ~0xFFFFFFull;
+    PHYSICAL_ADDRESS pa;
+    pa.QuadPart = (LONGLONG)d->segPhys;
+    d->segVa = (UCHAR*)MmMapIoSpace(pa, (SIZE_T)d->segBytes, MmWriteCombined);
+    if (!d->segVa) { LogF("vm vram: the segment cannot be mapped"); return FALSE; }
+    d->scanPage = NULL;
+    d->scanRec = NULL;
+    d->flipOk = FALSE;
+    d->pagingSegment = RegGet(L"PagingSegment", 0) ? 1 : 0;
+    LogF("vm vram: window %I64X + %I64X; segment %I64X + %I64X (frame buffer at %I64X)", win, winLen, d->segPhys, d->segBytes, d->fbPhys);
+    return TRUE;
+}
+#endif
+
 static BOOLEAN SetupVram(Device* d)
 {
+#ifdef P5_VM
+    return SetupVramVm(d);
+#endif
     if (!d->regs) { LogF("vram: no registers (not the PS5's GPU)"); return FALSE; }
     ULONG fbBase = RegRead(d, rFB_LOCATION_BASE), fbTop = RegRead(d, rFB_LOCATION_TOP), fbOffset = RegRead(d, rFB_OFFSET);
     ULONGLONG mcBase = (ULONGLONG)(fbBase & 0xFFFFFF) << 24, mcTop = ((ULONGLONG)(fbTop & 0xFFFFFF) << 24) | 0xFFFFFF;
@@ -2122,6 +2336,7 @@ static NTSTATUS APIENTRY FullQueryAdapterInfo(IN_CONST_HANDLE context, IN_CONST_
         info->height = d->height;
         info->pitch = d->pitch;
         info->fbPhys = d->full ? d->fbScan : (ULONGLONG)d->disp.PhysicAddress.QuadPart;
+        if (gWddm2) info->reserved = 20;                 // the user-mode drivers learn the mode here
         return STATUS_SUCCESS;
     }
     case DXGKQAITYPE_DRIVERCAPS: {
@@ -2131,18 +2346,27 @@ static NTSTATUS APIENTRY FullQueryAdapterInfo(IN_CONST_HANDLE context, IN_CONST_
         RtlZeroMemory(caps, q->OutputDataSize);
         caps->WDDMVersion = gWddm2 ? DXGKDDI_WDDMv2 : DXGKDDI_WDDMv1_3;
         caps->HighestAcceptableAddress.QuadPart = -1;
-        caps->FlipCaps.FlipOnVSyncMmIo = TRUE;
+        caps->FlipCaps.FlipOnVSyncMmIo = TRUE;      // 2.0 requires it (FALSE: adapter refused after the physical caps, VM 2026-11-23)
         caps->MaxQueuedFlipOnVSync = 1;
         caps->PresentationCaps.NoScreenToScreenBlt = 1;      // our copies are one-directional (CopyWc)
         caps->PresentationCaps.NoOverlapScreenBlt = 1;
         caps->SchedulingCaps.MultiEngineAware = 1;
         caps->SchedulingCaps.PreemptionAware = 1;
-        caps->GpuEngineTopology.NbAsymetricProcessingNodes = 1;
+        caps->GpuEngineTopology.NbAsymetricProcessingNodes = gTwoNodes ? 2 : 1;
         caps->SupportNonVGA = TRUE;
         caps->SupportSmoothRotation = FALSE;
         gGdi = RegGetSession(L"GdiInterop", 0);
         gGdiAccel = RegGetSession(L"GdiAccel", 0);
         gGdiTexCpu = RegGetSession(L"GdiTexCpu", 1);
+        if (gWddm2) {
+            // GPU virtual addressing through Windows' GPU MMU model (WDDM2-TABLE.md). GDI acceleration and the
+            // CDD/DWM interop are 1.3 experiments with an aperture segment, which 2.0 mode does not have.
+            gGdi = 0;
+            gGdiAccel = 0;
+            caps->MemoryManagementCaps.VirtualAddressingSupported = 1;
+            caps->MemoryManagementCaps.GpuMmuSupported = 1;
+            caps->MemoryManagementCaps.IoMmuSupported = 0;
+        }
         if (gGdiAccel) {
             gGdi = 0;
             caps->PresentationCaps.SupportKernelModeCommandBuffer = 1;
@@ -2231,6 +2455,7 @@ static NTSTATUS APIENTRY FullQueryAdapterInfo(IN_CONST_HANDLE context, IN_CONST_
         seg->Flags.CpuVisible = TRUE;
         seg->Size = (SIZE_T)d->segBytes;
         seg->CommitLimit = (SIZE_T)d->segBytes;
+        if (gWddm2) seg->Flags.LocalBudgetGroup = 1;     // 2.0: counts against the local budget (replaces ApplicationTarget)
         out->PagingBufferSegmentId = d->pagingSegment;
         out->PagingBufferSize = PAGE_SIZE;
         out->PagingBufferPrivateDataSize = sizeof(Op) * 32;
@@ -2255,16 +2480,55 @@ static NTSTATUS APIENTRY FullQueryAdapterInfo(IN_CONST_HANDLE context, IN_CONST_
         const ULONG need = FIELD_OFFSET(DXGK_PHYSICALADAPTERCAPS, Flags) + sizeof(DXGK_PHYSICALADAPTERFLAGS);
         if (q->OutputDataSize < need) { LogF("physical caps: %u bytes given, %u wanted", q->OutputDataSize, need); return STATUS_BUFFER_TOO_SMALL; }
         DXGK_PHYSICALADAPTERCAPS* pc = (DXGK_PHYSICALADAPTERCAPS*)q->pOutputData;
+        HANDLE given = pc->DxgkPhysicalAdapterHandle;
         RtlZeroMemory(pc, q->OutputDataSize < sizeof *pc ? q->OutputDataSize : sizeof *pc);
-        pc->NumExecutionNodes = 1;
+        pc->NumExecutionNodes = gTwoNodes ? 2 : 1;
         pc->PagingNodeIndex = 0;
-        LogF("physical caps asked");
+        if (gWddm2) {
+            // 2.0: VidMm reads the physical adapter's registry key through this handle (ReadPhysicalAdapterConfiguration
+            // -> DpiGetPnpRegistryKeyName). Zeroed, it is a NULL read in dxgkrnl: bug check 7E, seen in the VM
+            // 2026-11-23 (and most likely the console's 2.0 death of 2026-11-20). Keep what Windows put there, else
+            // dxgkrnl's handle for our device.
+            pc->DxgkPhysicalAdapterHandle = given ? given : d->dxgk.DeviceHandle;
+            pc->Flags.GpuMmuSupported = 1;
+            LogF("physical caps asked: handle given %p, answered %p", given, pc->DxgkPhysicalAdapterHandle);
+        } else {
+            LogF("physical caps asked");
+        }
+        return STATUS_SUCCESS;
+    }
+    case DXGKQAITYPE_GPUMMUCAPS: {
+        if (!gWddm2) break;
+        if (q->OutputDataSize < sizeof(DXGK_GPUMMUCAPS)) { LogF("gpu mmu caps: %u bytes given, %u wanted", q->OutputDataSize, (ULONG)sizeof(DXGK_GPUMMUCAPS)); return STATUS_BUFFER_TOO_SMALL; }
+        DXGK_GPUMMUCAPS* c = (DXGK_GPUMMUCAPS*)q->pOutputData;
+        RtlZeroMemory(c, q->OutputDataSize);
+        c->CacheCoherentMemorySupported = 1;             // only the CPU ever touches what the tables point at
+        c->PageTableUpdateMode = DXGK_PAGETABLEUPDATE_CPU_VIRTUAL;
+        c->VirtualAddressBitCount = kVaBits;
+        c->LeafPageTableSizeFor64KPagesInBytes = (kPtEntries / 16) * 8;
+        c->PageTableLevelCount = kPtLevels;
+        LogF("gpu mmu caps asked: %u levels x %u bits, %u-bit addresses, CPU updates", kPtLevels, kPtBits, kVaBits);
+        return STATUS_SUCCESS;
+    }
+    case DXGKQAITYPE_PAGETABLELEVELDESC: {
+        if (!gWddm2) break;
+        if (q->OutputDataSize < sizeof(DXGK_PAGE_TABLE_LEVEL_DESC)) return STATUS_BUFFER_TOO_SMALL;
+        UINT level = q->pInputData && q->InputDataSize >= sizeof(DXGK_QUERYPAGETABLELEVELDESCIN) ? ((const DXGK_QUERYPAGETABLELEVELDESCIN*)q->pInputData)->LevelIndex : 0xFFFF;
+        DXGK_PAGE_TABLE_LEVEL_DESC* l = (DXGK_PAGE_TABLE_LEVEL_DESC*)q->pOutputData;
+        RtlZeroMemory(l, sizeof *l);
+        l->PageTableIndexBitCount = kPtBits;
+        l->PageTableSegmentId = 0;                       // system memory
+        l->PagingProcessPageTableSegmentId = 0;
+        l->PageTableSizeInBytes = kPtEntries * 8;
+        l->PageTableAlignmentInBytes = PAGE_SIZE;
+        LogF("page table level %u asked (input %u bytes)", level, q->InputDataSize);
         return STATUS_SUCCESS;
     }
     default:
-        LogF("adapter info type %u: not supported", (ULONG)q->Type);
-        return STATUS_NOT_SUPPORTED;
+        break;
     }
+    LogF("adapter info type %u: not supported", (ULONG)q->Type);
+    return STATUS_NOT_SUPPORTED;
 }
 
 // ---- devices and contexts (one per program and its rendering thread; nothing to keep) ----
@@ -2288,19 +2552,36 @@ static NTSTATUS APIENTRY DdiCreateContext(IN_CONST_HANDLE device, INOUT_PDXGKARG
     Tr tr("DdiCreateContext");
     Device* d = (Device*)device;
     arg->hContext = d;
+    if (gWddm2 && arg->Flags.VirtualAddressing) {             // 2.0: a virtual context keeps its root page table
+        Ctx* c = (Ctx*)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(Ctx), P5_TAG);
+        if (!c) return STATUS_NO_MEMORY;
+        c->magic = kCtxMagic;
+        c->d = d;
+        c->virt = TRUE;
+        arg->hContext = c;
+        W2Count(W2_VCTX);
+    }
     arg->ContextInfo.DmaBufferSegmentSet = 0;
+    // 2.0, virtual contexts: their DMA buffers must be VidMm allocations (set 0 = plain contiguous system memory, which
+    // VidMm cannot map into the context's GPU addresses: NULL allocation in VIDMM_DMA_POOL::AddDmaBufferToPool, bug
+    // check 3B in the VM 2026-11-23). Segment 1 = our memory segment.
+    if (gWddm2 && arg->Flags.VirtualAddressing) arg->ContextInfo.DmaBufferSegmentSet = 1;
     arg->ContextInfo.DmaBufferSize = 64 * 1024;
     arg->ContextInfo.DmaBufferPrivateDataSize = sizeof(Op);
     arg->ContextInfo.AllocationListSize = DXGK_ALLOCATION_LIST_SIZE_GDICONTEXT;
     arg->ContextInfo.PatchLocationListSize = DXGK_ALLOCATION_LIST_SIZE_GDICONTEXT;
     InterlockedIncrement(&d->contexts);
-    LogF("context created (node %u%s)", arg->NodeOrdinal, arg->Flags.SystemContext ? ", system" : "");
+    LogF("context created (node %u%s%s)", arg->NodeOrdinal, arg->Flags.SystemContext ? ", system" : "", gWddm2 && arg->Flags.VirtualAddressing ? ", virtual" : "");
     return STATUS_SUCCESS;
 }
 static NTSTATUS APIENTRY DdiDestroyContext(IN_CONST_HANDLE context)
 {
     Tr tr("DdiDestroyContext");
-    InterlockedDecrement(&((Device*)context)->contexts);
+    InterlockedDecrement(&DevOf(context)->contexts);
+    if (gWddm2 && context && ((const Ctx*)context)->magic == kCtxMagic) {
+        ((Ctx*)context)->magic = 0;
+        ExFreePoolWithTag((PVOID)context, P5_TAG);
+    }
     return STATUS_SUCCESS;
 }
 
@@ -2411,6 +2692,11 @@ static NTSTATUS APIENTRY DdiCreateAllocation(IN_CONST_HANDLE context, INOUT_PDXG
         Alloc* a = (Alloc*)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(Alloc), P5_TAG);
         if (!a) return STATUS_NO_MEMORY;
         a->info = *in;
+        a->segAddr = 0;
+        a->inSeg = 0;
+        a->pic = NULL;
+        a->picSeq = 0;
+        if (gWddm2) CookieAdd(a);
         ai->hAllocation = a;
         if ((in->kind & 0xFF) == P5A_GDI) TraceF("gdi alloc %p type %u %ux%u created", a, in->kind >> 8, in->width, in->height);
         ai->Alignment = 0x10000;
@@ -2441,6 +2727,7 @@ static NTSTATUS APIENTRY DdiCreateAllocation(IN_CONST_HANDLE context, INOUT_PDXG
         if ((gt == D3DKMDT_GDISURFACE_TEXTURE || gt == D3DKMDT_GDISURFACE_TEXTURE_CROSSADAPTER) && !gGdiTexCpu) ai->Flags.CpuVisible = FALSE;
         // Shared surfaces of our Direct3D driver (kind 4 with bit 0x100: flip-model buffers and the like): Windows drops a
         // shared allocation that is CPU-visible right after creating it (seen 2026-11-21, as with GDI textures).
+        // (2.0 the same: a CPU-visible shared allocation made D3D12 swap-chain creation fail, console 2026-11-23.)
         if ((in->kind & 0xFF) == P5A_USER && (in->kind & 0x100)) ai->Flags.CpuVisible = FALSE;
         // History (the aperture design of 2026-11-20, build/ps5gpu/wddm/ps5wddm-0.3.2146-aperture.cpp): there Windows
         // made the pages write-combined and our reads crawled; Flags.Cached made Windows destroy the primary at once.
@@ -2461,6 +2748,8 @@ static NTSTATUS APIENTRY DdiDestroyAllocation(IN_CONST_HANDLE context, IN_CONST_
     for (UINT i = 0; i < arg->NumAllocations; ++i) {
         Alloc* a = (Alloc*)arg->pAllocationList[i];
         if (!a) continue;
+        CookieRemove(a);
+        if (a->pic) { ExFreePoolWithTag(a->pic, P5_TAG); a->pic = NULL; }
         if (KindOf(a) == P5A_GDI) TraceF("gdi alloc %p type %u %ux%u destroyed", a, GdiTypeOf(a), a->info.width, a->info.height);
         UnmapAp(a);
         if (d->source == a) {                                // the picture on the screen goes away: show the frame buffer
@@ -2507,6 +2796,188 @@ static NTSTATUS APIENTRY DdiOpenAllocation(IN_CONST_HANDLE device, IN_CONST_PDXG
 }
 static NTSTATUS APIENTRY DdiCloseAllocation(IN_CONST_HANDLE, IN_CONST_PDXGKARG_CLOSEALLOCATION) { Tr tr("DdiCloseAllocation"); return STATUS_SUCCESS; }
 
+// ---- WDDM 2.0: the page-table operations (written by the CPU at once; see the block after struct Resource) ----
+static BOOLEAN W2TableOk(const void* t)
+{
+    return t && (ULONG_PTR)t >= (ULONG_PTR)MmSystemRangeStart && ((ULONG_PTR)t & 7) == 0 && MmIsAddressValid((PVOID)t) &&
+           MmIsAddressValid((PVOID)((const UCHAR*)t + kPtEntries * 8 - 1));
+}
+static void W2UpdatePageTable(const DXGK_BUILDPAGINGBUFFER_UPDATEPAGETABLE* u, BOOLEAN init)
+{
+    LONG call = W2Count(W2_PTE_CALLS);
+    ULONGLONG* t = (ULONGLONG*)u->PageTableAddress.CpuVirtual;
+    UINT first = u->StartIndex, n = u->NumPageTableEntries;
+    BOOLEAN leaf = u->PageTableLevel == kPtLevels - 1;
+    if (call <= 40)
+        TraceF("update page table: level %u table %p entries %u..+%u flags %X%s, first entry valid %u seg %u page %I64X", u->PageTableLevel, t, first, n,
+               *(const UINT*)&u->Flags, init ? " (no DMA buffer)" : "", u->pPageTableEntries && n ? (ULONG)u->pPageTableEntries[0].Valid : 0,
+               u->pPageTableEntries && n ? (ULONG)u->pPageTableEntries[0].Segment : 0, u->pPageTableEntries && n ? (ULONGLONG)u->pPageTableEntries[0].PageAddress : 0);
+    // Only a whole, mapped, kernel 4 KB table is written; anything else is counted and left alone.
+    if (!u->pPageTableEntries || u->PageTableLevel >= kPtLevels || first >= kPtEntries || n > kPtEntries - first || !W2TableOk(t)) {
+        if (W2Count(W2_PTE_BAD) <= 10) LogF("update page table refused: level %u table %p %u..+%u", u->PageTableLevel, t, first, n);
+        return;
+    }
+    for (UINT i = 0; i < n; ++i) t[first + i] = PteFromDxgk(&u->pPageTableEntries[u->Flags.Repeat ? 0 : i], leaf);
+    if (call <= 40) TraceF("  table %p is physical %I64X; wrote [%u] = %I64X", t, (ULONGLONG)MmGetPhysicalAddress(t).QuadPart, first, t[first]);
+    InterlockedExchangeAdd(&gW2[W2_PTE_WRITTEN], (LONG)n);
+}
+static void W2PagingNote(const DXGKARG_BUILDPAGINGBUFFER* arg)
+{
+    LONG k = 0;
+    switch (arg->Operation) {
+    case DXGK_OPERATION_FLUSH_TLB: k = W2Count(W2_TLB); break;
+    case DXGK_OPERATION_COPY_PAGE_TABLE_ENTRIES:
+        k = W2Count(W2_COPYPTE);
+        if (k <= 10) {
+            const DXGK_BUILDPAGINGBUFFER_COPYPAGETABLEENTRIES* c = &arg->CopyPageTableEntries;
+            TraceF("copy page table entries: %u ranges, first %u entries %I64X[%u] -> %I64X[%u] (NOT copied yet)", c->NumRanges, c->pRanges && c->NumRanges ? c->pRanges[0].NumPageTableEntries : 0,
+                   c->pRanges && c->NumRanges ? (ULONGLONG)c->pRanges[0].SrcPageTableAddress : 0, c->pRanges && c->NumRanges ? c->pRanges[0].SrcStartPteIndex : 0,
+                   c->pRanges && c->NumRanges ? (ULONGLONG)c->pRanges[0].DstPageTableAddress : 0, c->pRanges && c->NumRanges ? c->pRanges[0].DstStartPteIndex : 0);
+        }
+        return;
+    case DXGK_OPERATION_NOTIFY_RESIDENCY: k = W2Count(W2_RESID); break;
+    case DXGK_OPERATION_UPDATE_CONTEXT_ALLOCATION: k = W2Count(W2_CTXALLOC); break;
+    case DXGK_OPERATION_VIRTUAL_TRANSFER:
+        k = W2Count(W2_VXFER);
+        if (k <= 10) TraceF("VIRTUAL TRANSFER (not done): %I64u bytes %I64X -> %I64X direction %u", arg->TransferVirtual.TransferSizeInBytes,
+                            (ULONGLONG)arg->TransferVirtual.SourceVirtualAddress, (ULONGLONG)arg->TransferVirtual.DestinationVirtualAddress, (ULONG)arg->TransferVirtual.TransferDirection);
+        return;
+    case DXGK_OPERATION_VIRTUAL_FILL:
+        k = W2Count(W2_VFILL);
+        if (k <= 10) TraceF("VIRTUAL FILL (not done): %I64u bytes at %I64X", arg->FillVirtual.FillSizeInBytes, (ULONGLONG)arg->FillVirtual.DestinationVirtualAddress);
+        return;
+    default: k = W2Count(W2_OTHER); break;
+    }
+    if (k <= 5) TraceF("paging operation %u (2.0): noted, nothing to do", (ULONG)arg->Operation);
+}
+
+// Our page-table walker: Windows' GPU virtual address -> those 8 bytes, read or written by the CPU. Tables and pages in
+// system memory (segment 0) are physical addresses: each is mapped for the moment through a one-page MDL (cached, like
+// the paging code's system pages; MmGetVirtualForPhysical returns NULL for VidMm's page-table pages, console
+// 2026-11-23). Pages in our memory segment (1) go through the segment mapping. Anything else, or unmapped: failure.
+// PASSIVE_LEVEL only (engine thread, escape).
+struct W2Map { ULONGLONG* p; UCHAR* va; PMDL mdl; };
+static BOOLEAN W2MapQword(Device* d, ULONG seg, ULONGLONG addr, W2Map* m)
+{
+    m->p = NULL; m->va = NULL; m->mdl = NULL;
+    if ((addr & 7) != 0) return FALSE;
+    if (seg == 1) {                                          // segment address or offset into it: both are accepted
+        ULONGLONG a = addr >= d->segPhys ? addr : d->segPhys + addr;
+        m->p = (ULONGLONG*)SegPtr(d, a, 8);
+        return m->p != NULL;
+    }
+    if (seg != 0 || KeGetCurrentIrql() > APC_LEVEL) return FALSE;
+    PMDL mdl = IoAllocateMdl(NULL, PAGE_SIZE, FALSE, FALSE, NULL);
+    if (!mdl) return FALSE;
+    MmGetMdlPfnArray(mdl)[0] = (PFN_NUMBER)(addr >> PAGE_SHIFT);
+    mdl->MdlFlags |= MDL_PAGES_LOCKED;
+    UCHAR* va = (UCHAR*)MmMapLockedPagesSpecifyCache(mdl, KernelMode, MmCached, NULL, FALSE, NormalPagePriority | MdlMappingNoExecute);
+    if (!va) { IoFreeMdl(mdl); return FALSE; }
+    m->mdl = mdl; m->va = va;
+    m->p = (ULONGLONG*)(va + (addr & (PAGE_SIZE - 1)));
+    return TRUE;
+}
+static void W2Unmap(W2Map* m)
+{
+    if (m->mdl) { MmUnmapLockedPages(m->va, m->mdl); IoFreeMdl(m->mdl); }
+    m->p = NULL; m->va = NULL; m->mdl = NULL;
+}
+// Reads (write == FALSE) or writes *value at GPU VA `va` of the address space whose root table is rootSeg/root.
+static BOOLEAN W2Access(Device* d, ULONG rootSeg, ULONGLONG root, ULONGLONG va, ULONGLONG* value, BOOLEAN write, BOOLEAN say)
+{
+    if (!root || va >= (1ull << kVaBits)) return FALSE;
+    ULONG seg = rootSeg;
+    ULONGLONG table = root;
+    for (ULONG level = 0; level < kPtLevels; ++level) {
+        ULONG index = (ULONG)(va >> (12 + (kPtLevels - 1 - level) * kPtBits)) & (kPtEntries - 1);
+        W2Map m;
+        BOOLEAN ok = W2MapQword(d, seg, table + index * 8ull, &m);
+        ULONGLONG pte = ok ? *m.p : 0;
+        W2Unmap(&m);
+        if (say) TraceF("  walk level %u: table seg %u %I64X index %u -> %s entry %I64X", level, seg, table, index, ok ? "mapped" : "NOT MAPPABLE", pte);
+        if (!(pte & 1)) return FALSE;
+        seg = (ULONG)(pte >> 2) & 0x1F;
+        table = pte & ~0xFFFull;
+    }
+    W2Map m;
+    if (!W2MapQword(d, seg, table + (va & 0xFF8), &m)) return FALSE;
+    if (write) *(volatile ULONGLONG*)m.p = *value;
+    else *value = *(volatile ULONGLONG*)m.p;
+    W2Unmap(&m);
+    return TRUE;
+}
+// The page that GPU VA `va` lies in: its segment and address (walker's last level), or FALSE.
+static BOOLEAN W2Resolve(Device* d, ULONG rootSeg, ULONGLONG root, ULONGLONG va, ULONG* seg, ULONGLONG* page)
+{
+    if (!root || va >= (1ull << kVaBits)) return FALSE;
+    ULONG sg = rootSeg;
+    ULONGLONG table = root;
+    for (ULONG level = 0; level < kPtLevels; ++level) {
+        ULONG index = (ULONG)(va >> (12 + (kPtLevels - 1 - level) * kPtBits)) & (kPtEntries - 1);
+        W2Map m;
+        BOOLEAN ok = W2MapQword(d, sg, table + index * 8ull, &m);
+        ULONGLONG pte = ok ? *m.p : 0;
+        W2Unmap(&m);
+        if (!(pte & 1)) return FALSE;
+        sg = (ULONG)(pte >> 2) & 0x1F;
+        table = pte & ~0xFFFull;
+    }
+    *seg = sg;
+    *page = table;
+    return TRUE;
+}
+// A CPU view of one page (segment 1: the segment mapping; segment 0: a one-page MDL), released with W2Unmap.
+static UCHAR* W2MapPage(Device* d, ULONG seg, ULONGLONG page, W2Map* m)
+{
+    m->p = NULL; m->va = NULL; m->mdl = NULL;
+    if (seg == 1) {
+        ULONGLONG a = page >= d->segPhys ? page : d->segPhys + page;
+        return (UCHAR*)SegPtr(d, a, PAGE_SIZE);
+    }
+    if (seg != 0) return NULL;
+    PMDL mdl = IoAllocateMdl(NULL, PAGE_SIZE, FALSE, FALSE, NULL);
+    if (!mdl) return NULL;
+    MmGetMdlPfnArray(mdl)[0] = (PFN_NUMBER)(page >> PAGE_SHIFT);
+    mdl->MdlFlags |= MDL_PAGES_LOCKED;
+    UCHAR* va = (UCHAR*)MmMapLockedPagesSpecifyCache(mdl, KernelMode, MmCached, NULL, FALSE, NormalPagePriority | MdlMappingNoExecute);
+    if (!va) { IoFreeMdl(mdl); return NULL; }
+    m->mdl = mdl; m->va = va;
+    return va;
+}
+// op: srcSeg/srcAddr = root, rects[0..1] = source GPU VA, dstAddr = destination GPU VA, bytes = length. The user-mode
+// Direct3D 12 driver copies a picture into a shared (not CPU-visible) swap-chain allocation this way.
+static void W2DoCopy(Device* d, const Op* op)
+{
+    ULONGLONG src = *(const ULONGLONG*)&op->rects[0], dst = op->dstAddr, left = op->bytes, done = 0;
+    while (left) {
+        ULONG ss, ds;
+        ULONGLONG sp, dp;
+        if (!W2Resolve(d, op->srcSeg, op->srcAddr, src, &ss, &sp) || !W2Resolve(d, op->srcSeg, op->srcAddr, dst, &ds, &dp)) break;
+        ULONGLONG so = src & (PAGE_SIZE - 1), dof = dst & (PAGE_SIZE - 1);
+        ULONGLONG n = PAGE_SIZE - (so > dof ? so : dof);
+        if (n > left) n = left;
+        W2Map ms, md;
+        UCHAR* s = W2MapPage(d, ss, sp, &ms);
+        UCHAR* t = W2MapPage(d, ds, dp, &md);
+        if (s && t) RtlCopyMemory(t + dof, s + so, (SIZE_T)n);
+        W2Unmap(&ms);
+        W2Unmap(&md);
+        if (!s || !t) break;
+        src += n; dst += n; left -= n; done += n;
+    }
+    static volatile LONG said;
+    if (InterlockedIncrement(&said) <= 10 || left) TraceF("va copy %I64X -> %I64X: %I64u of %I64u bytes", *(const ULONGLONG*)&op->rects[0], op->dstAddr, done, op->bytes);
+}
+static void W2DoFence(Device* d, const Op* op)           // op: dstAddr = fence GPU VA, bytes = value, srcSeg/srcAddr = root
+{
+    static volatile LONG said;
+    ULONGLONG v = op->bytes;
+    BOOLEAN ok = W2Access(d, op->srcSeg, op->srcAddr, op->dstAddr, &v, TRUE, FALSE);
+    LONG n = InterlockedIncrement(&said);
+    if (!ok && n <= 20) W2Access(d, op->srcSeg, op->srcAddr, op->dstAddr, &v, FALSE, TRUE);
+    if (n <= 20) TraceF("fence write %I64X = %I64u: %s", op->dstAddr, op->bytes, ok ? "done" : "NOT MAPPED");
+}
+
 // Windows' memory manager moves allocations into the segment, out of it and around in it. Each request becomes one
 // operation in the paging buffer's private data, done by the engine thread when the buffer is submitted, in order
 // with everything else (the page list of the system-memory side stays valid until that buffer has completed).
@@ -2531,6 +3002,10 @@ static NTSTATUS APIENTRY DdiBuildPagingBuffer(IN_CONST_HANDLE context, IN_PDXGKA
         if (dstSeg) op.dstAddr = (ULONGLONG)arg->Transfer.Destination.SegmentAddress.QuadPart + arg->Transfer.TransferOffset;
         else op.mdl = arg->Transfer.Destination.pMdl;
         op.kind = srcSeg && dstSeg ? OP_PAGE_MOVE : dstSeg ? OP_PAGE_IN : srcSeg ? OP_PAGE_OUT : OP_NOP;
+        if (gWddm2 && op.dst) {
+            if (op.dstSeg == 1) { op.dst->segAddr = (ULONGLONG)arg->Transfer.Destination.SegmentAddress.QuadPart; op.dst->inSeg = 1; }
+            else op.dst->inSeg = 0;
+        }
         if (InterlockedIncrement(&said) <= 24)
             LogF("transfer %s: %I64u bytes, segment address %I64X -> %I64X, offset %u, page %u of the list, flags %X",
                  op.kind == OP_PAGE_MOVE ? "move" : op.kind == OP_PAGE_IN ? "in" : op.kind == OP_PAGE_OUT ? "out" : "?", op.bytes, op.srcAddr, op.dstAddr,
@@ -2544,6 +3019,7 @@ static NTSTATUS APIENTRY DdiBuildPagingBuffer(IN_CONST_HANDLE context, IN_PDXGKA
         op.dstAddr = (ULONGLONG)arg->Fill.Destination.SegmentAddress.QuadPart;
         op.dstSeg = arg->Fill.Destination.SegmentId;
         op.dst = (Alloc*)arg->Fill.hAllocation;
+        if (gWddm2 && op.dst && op.dstSeg == 1) { op.dst->segAddr = op.dstAddr; op.dst->inSeg = 1; }
         if (InterlockedIncrement(&said) <= 24) LogF("fill: %I64u bytes at %I64X with %08X", op.bytes, op.dstAddr, op.color);
         break;
     case DXGK_OPERATION_MAP_APERTURE_SEGMENT:                // done by the engine thread, in order with the rest
@@ -2562,7 +3038,21 @@ static NTSTATUS APIENTRY DdiBuildPagingBuffer(IN_CONST_HANDLE context, IN_PDXGKA
         op.dst = (Alloc*)arg->UnmapApertureSegment.hAllocation;
         if (!op.dst) return STATUS_SUCCESS;
         break;
+    case DXGK_OPERATION_UPDATE_PAGE_TABLE:
+        if (!gWddm2) goto nothing;
+        W2UpdatePageTable(&arg->UpdatePageTable, arg->pDmaBuffer == NULL);
+        return STATUS_SUCCESS;
+    case DXGK_OPERATION_FLUSH_TLB:
+    case DXGK_OPERATION_COPY_PAGE_TABLE_ENTRIES:
+    case DXGK_OPERATION_NOTIFY_RESIDENCY:
+    case DXGK_OPERATION_UPDATE_CONTEXT_ALLOCATION:
+    case DXGK_OPERATION_VIRTUAL_TRANSFER:
+    case DXGK_OPERATION_VIRTUAL_FILL:
+        if (!gWddm2) goto nothing;
+        W2PagingNote(arg);
+        return STATUS_SUCCESS;
     default:                                                 // discard content and the like: nothing to do, never an error
+    nothing:
         if (InterlockedIncrement(&said) <= 24) LogF("paging operation %u: nothing to do", (ULONG)arg->Operation);
         return STATUS_SUCCESS;
     }
@@ -2604,8 +3094,15 @@ static NTSTATUS APIENTRY DdiBuildPagingBuffer(IN_CONST_HANDLE context, IN_PDXGKA
 static NTSTATUS APIENTRY DdiPresent(IN_CONST_HANDLE context, INOUT_PDXGKARG_PRESENT arg)
 {
     Tr tr("DdiPresent");
-    Device* d = (Device*)context;
+    Device* d = DevOf(context);
     d->presents3++;
+    if (gWddm2) {
+        static volatile LONG said;
+        if (InterlockedIncrement(&said) <= 30)
+            TraceF("w2 present: flags %X dma %p size %u private %p size %u src %p dst %p alloc list %p", arg->Flags.Value, arg->pDmaBuffer, arg->DmaSize,
+                   arg->pDmaBufferPrivateData, arg->DmaBufferPrivateDataSize, arg->pAllocationList ? arg->pAllocationList[0].hDeviceSpecificAllocation : NULL,
+                   arg->pAllocationList ? arg->pAllocationList[1].hDeviceSpecificAllocation : NULL, arg->pAllocationList);
+    }
     if (arg->Flags.Flip) {                                   // the flip itself arrives as SetVidPnSourceAddress
         d->flips++;
         return STATUS_SUCCESS;
@@ -2691,7 +3188,7 @@ static BOOLEAN CopyPatchList(DXGKARG_RENDER* arg, UINT n)
 static NTSTATUS APIENTRY DdiRender(IN_CONST_HANDLE context, INOUT_PDXGKARG_RENDER arg)
 {
     Tr tr("DdiRender");
-    Device* d = (Device*)context;
+    Device* d = DevOf(context);
     d->renders++;
     if (!arg->pDmaBuffer || !arg->pDmaBufferPrivateData) return STATUS_SUCCESS;
     if (arg->DmaSize < 16 || arg->DmaBufferPrivateDataSize < sizeof(Op)) return STATUS_GRAPHICS_INSUFFICIENT_DMA_BUFFER;
@@ -2783,7 +3280,7 @@ static GdiBlob* PeekBlob(Device* d, ULONG id)
 static NTSTATUS APIENTRY DdiRenderKm(IN_CONST_HANDLE context, INOUT_PDXGKARG_RENDER arg)
 {
     Tr tr("DdiRenderKm");
-    Device* d = (Device*)context;
+    Device* d = DevOf(context);
     d->renderKms++;
     if (!arg->pDmaBuffer || !arg->pDmaBufferPrivateData || arg->DmaSize < 16 || arg->DmaBufferPrivateDataSize < sizeof(Op)) return STATUS_GRAPHICS_INSUFFICIENT_DMA_BUFFER;
     const UCHAR* p0 = (const UCHAR*)arg->pCommand;
@@ -2869,6 +3366,17 @@ static NTSTATUS APIENTRY DdiPatch(IN_CONST_HANDLE context, IN_CONST_PDXGKARG_PAT
 {
     Tr tr("DdiPatch");
     Device* d = (Device*)context;
+    if (gWddm2 && arg->pAllocationList && !arg->Flags.Paging) {
+        // Where the Direct3D 12 driver's allocations are right now (DWM's driver reads the shared swap-chain buffers
+        // through copies like this one): the copy escape writes there.
+        for (UINT i = 0; i < arg->AllocationListSize; ++i) {
+            Alloc* a = (Alloc*)arg->pAllocationList[i].hDeviceSpecificAllocation;
+            if (a && IsCookie(a->info.gpuPhys) && arg->pAllocationList[i].SegmentId == 1) {
+                a->segAddr = (ULONGLONG)arg->pAllocationList[i].PhysicalAddress.QuadPart;
+                a->inSeg = 1;
+            }
+        }
+    }
     if (arg->Flags.Paging || !arg->pDmaBufferPrivateData || !arg->pPatchLocationList || !arg->pAllocationList) return STATUS_SUCCESS;
     ULONG at = arg->DmaBufferPrivateDataSubmissionStartOffset;
     if (arg->DmaBufferPrivateDataSize < sizeof(Op) || at > arg->DmaBufferPrivateDataSize - sizeof(Op)) return STATUS_SUCCESS;
@@ -2913,21 +3421,21 @@ static NTSTATUS APIENTRY DdiSubmitCommand(IN_CONST_HANDLE context, IN_CONST_PDXG
     if (arg->pDmaBufferPrivateData && e > s && e <= arg->DmaBufferPrivateDataSize) n = (e - s) / sizeof(Op);
     if (d->submits++ < 10)
         TraceF("submit fence %u: private data %u..%u of %u -> %u operations%s", arg->SubmissionFenceId, s, e, arg->DmaBufferPrivateDataSize, n, arg->Flags.Paging ? " (paging)" : "");
-    EnqueueOps(d, arg->SubmissionFenceId, n ? (const Op*)((const UCHAR*)arg->pDmaBufferPrivateData + s) : NULL, n, OP_NOP);
+    EnqueueOpsNode(d, gTwoNodes ? arg->NodeOrdinal : 0, arg->SubmissionFenceId, n ? (const Op*)((const UCHAR*)arg->pDmaBufferPrivateData + s) : NULL, n, OP_NOP);
     return STATUS_SUCCESS;
 }
 
 static NTSTATUS APIENTRY DdiPreemptCommand(IN_CONST_HANDLE context, IN_CONST_PDXGKARG_PREEMPTCOMMAND arg)
 {
     Tr tr("DdiPreemptCommand");
-    EnqueueOps((Device*)context, arg->PreemptionFenceId, NULL, 0, OP_PREEMPT);
+    EnqueueOpsNode((Device*)context, gTwoNodes ? arg->NodeOrdinal : 0, arg->PreemptionFenceId, NULL, 0, OP_PREEMPT);
     return STATUS_SUCCESS;
 }
 
 static NTSTATUS APIENTRY DdiQueryCurrentFence(IN_CONST_HANDLE context, INOUT_PDXGKARG_QUERYCURRENTFENCE arg)
 {
     Tr tr("DdiQueryCurrentFence");
-    arg->CurrentFence = (ULONG)((Device*)context)->lastCompleted;
+    arg->CurrentFence = (ULONG)(gTwoNodes && arg->NodeOrdinal == 1 ? ((Device*)context)->lastCompleted1 : ((Device*)context)->lastCompleted);
     return STATUS_SUCCESS;
 }
 
@@ -2939,6 +3447,7 @@ static NTSTATUS APIENTRY DdiResetFromTimeout(IN_CONST_HANDLE context)
     KeAcquireSpinLock(&d->queueLock, &irql);
     DiscardQueue(d);                                         // whatever was queued is forgotten, as a reset means
     KeReleaseSpinLock(&d->queueLock, irql);
+    if (gWddm2) { InterlockedExchange(&gParkDrop, 1); WakeEngine(d); }
     LogF("RESET FROM TIMEOUT (submitted %ld completed %ld)", d->lastSubmitted, d->lastCompleted);
     return STATUS_SUCCESS;
 }
@@ -2953,19 +3462,119 @@ static NTSTATUS APIENTRY DdiQueryEngineStatus(IN_CONST_HANDLE, INOUT_PDXGKARG_QU
 static NTSTATUS APIENTRY DdiResetEngine(IN_CONST_HANDLE context, INOUT_PDXGKARG_RESETENGINE arg)
 {
     Tr tr("DdiResetEngine");
-    arg->LastAbortedFenceId = (ULONG)((Device*)context)->lastCompleted;
+    arg->LastAbortedFenceId = (ULONG)(gTwoNodes && arg->NodeOrdinal == 1 ? ((Device*)context)->lastCompleted1 : ((Device*)context)->lastCompleted);
+    if (gWddm2) { InterlockedExchange(&gParkDrop, 1); WakeEngine((Device*)context); }
     LogF("RESET ENGINE");
     return STATUS_SUCCESS;
 }
 static NTSTATUS APIENTRY DdiCancelCommand(IN_CONST_HANDLE, IN_CONST_PDXGKARG_CANCELCOMMAND) { Tr tr("DdiCancelCommand"); return STATUS_SUCCESS; }
-static NTSTATUS APIENTRY DdiGetNodeMetadata(IN_CONST_HANDLE, UINT, OUT_PDXGKARG_GETNODEMETADATA arg)
+static NTSTATUS APIENTRY DdiGetNodeMetadata(IN_CONST_HANDLE, UINT node, OUT_PDXGKARG_GETNODEMETADATA arg)
 {
     Tr tr("DdiGetNodeMetadata");
     RtlZeroMemory(arg, sizeof *arg);
     arg->EngineType = DXGK_ENGINE_TYPE_3D;
+    // 2.0: whether the engine runs virtual contexts (needed by CreateContextVirtual: C000000D without it). Off by default:
+    // with it the system context becomes virtual and VidMm's init crashes (paging buffers in system memory, bug check
+    // 7E in a GPU VA mapping) or refuses the adapter (paging buffers in the segment). VM 2026-11-23; phase 3 item.
+    // Two nodes (gTwoNodes): node 0 stays the physical 3D engine that also pages (DWM keeps our D3D10 driver only while
+    // node 0 has no GPU MMU, console 2026-11-23); node 1 is a second 3D engine with GPU MMU for virtual contexts (D3D12).
+    // (With node 0 virtual and node 1 the paging engine, virtual contexts worked but DWM went to WARP.)
+    if (gTwoNodes && node == 1) {
+        arg->EngineType = DXGK_ENGINE_TYPE_3D;          // (no compute type at this interface version)
+        arg->GpuMmuSupported = TRUE;
+    }
     return STATUS_SUCCESS;
 }
-static NTSTATUS APIENTRY DdiEscape(IN_CONST_HANDLE, IN_CONST_PDXGKARG_ESCAPE) { Tr tr("DdiEscape"); return STATUS_NOT_SUPPORTED; }
+// 2.0 mode: P5E_FENCE_READ {magic, code, va, value}: the 8 bytes at a GPU virtual address of the calling context.
+struct P5Escape { ULONG magic, code; ULONGLONG va, value; };
+#define P5E_MAGIC 0x45355350u                // "PS5E"
+enum : ULONG { P5E_FENCE_READ = 1, P5E_COPY = 2, P5E_WRITE = 3, P5E_READ = 4, P5E_TICK = 5, P5E_FBREAD = 6 };
+// P5E_READ: va = cookie, value = byte offset, then a ULONG size and room for the bytes: copied from the picture
+// buffer (value out = bytes, va out = picture sequence number, 0 = no picture yet).   // P5E_COPY: va = source cookie, value = destination cookie
+// P5E_WRITE: va = cookie, value = byte offset, then a ULONG size and the bytes: written into that allocation where
+// it last was (value out = bytes written, 0 if its place is not known yet).
+static NTSTATUS APIENTRY DdiEscape(IN_CONST_HANDLE adapter, IN_CONST_PDXGKARG_ESCAPE arg)
+{
+    Tr tr("DdiEscape");
+    if (!gWddm2 || !arg->pPrivateDriverData || arg->PrivateDriverDataSize < sizeof(P5Escape)) return STATUS_NOT_SUPPORTED;
+    P5Escape* e = (P5Escape*)arg->pPrivateDriverData;
+    if (e->magic == P5E_MAGIC && (e->code == P5E_WRITE || e->code == P5E_READ) && arg->PrivateDriverDataSize >= sizeof(P5Escape) + 4) {
+        ULONG size = *(const ULONG*)(e + 1);
+        UCHAR* data = (UCHAR*)(e + 1) + 4;
+        Alloc* t = CookieFind(e->va);
+        ULONGLONG off = e->value;
+        e->value = 0;
+        if (!t || t->info.bytes > 64ull * 1024 * 1024 || size > arg->PrivateDriverDataSize - sizeof(P5Escape) - 4 || off > t->info.bytes ||
+            size > t->info.bytes - off)
+            return STATUS_SUCCESS;
+        if (e->code == P5E_WRITE) {
+            if (!t->pic) {
+                UCHAR* p = (UCHAR*)ExAllocatePool2(POOL_FLAG_NON_PAGED, (SIZE_T)t->info.bytes, P5_TAG);
+                if (!p || InterlockedCompareExchangePointer((PVOID volatile*)&t->pic, p, NULL)) { if (p) ExFreePoolWithTag(p, P5_TAG); }
+            }
+            if (!t->pic) return STATUS_SUCCESS;
+            RtlCopyMemory(t->pic + off, data, size);
+            if (off + size == t->info.bytes) InterlockedIncrement(&t->picSeq);
+        } else {
+            e->va = (ULONGLONG)t->picSeq;
+            if (!t->pic || !t->picSeq) return STATUS_SUCCESS;
+            RtlCopyMemory(data, t->pic + off, size);
+        }
+        e->value = size;
+        return STATUS_SUCCESS;
+    }
+    // P5E_FBREAD (diagnostics, fbshot.exe): what is scanned out right now, also the secure desktop and LogonUI, which
+    // no capture inside the user's session sees. Then a ULONG size: 0 = only answer value = pitch << 32 | height << 16
+    // | width; else size bytes from byte offset va of the picture (rows of `pitch` bytes) follow, value = bytes copied.
+    // Diagnostics builds only (DIAG=1 build.sh -> P5_DIAG_FBREAD): any process could read the secure desktop with it.
+#ifdef P5_DIAG_FBREAD
+    if (e->magic == P5E_MAGIC && e->code == P5E_FBREAD && arg->PrivateDriverDataSize >= sizeof(P5Escape) + 4) {
+        Device* d = (Device*)adapter;
+        ULONG size = *(const ULONG*)(e + 1);
+        ULONGLONG bytes = (ULONGLONG)d->pitch * d->height;
+        const UCHAR* pic = d->source ? SegPtr(d, (ULONGLONG)d->sourceAddress.QuadPart, bytes) : NULL;
+        if (!pic) pic = d->fb;
+        ULONGLONG off = e->va;
+        e->value = 0;
+        if (!size) { e->value = ((ULONGLONG)d->pitch << 32) | ((ULONGLONG)(d->height & 0xFFFF) << 16) | (d->width & 0xFFFF); return STATUS_SUCCESS; }
+        if (!pic || size > arg->PrivateDriverDataSize - sizeof(P5Escape) - 4 || off > bytes || size > bytes - off) return STATUS_SUCCESS;
+        CopyWc((UCHAR*)(e + 1) + 4, pic + off, size);
+        e->value = size;
+        return STATUS_SUCCESS;
+    }
+#endif
+    // P5E_TICK: va = queue key, value = tick done (kernel wait op); va 0 = "is it there" (answers value 1)
+    if (e->magic == P5E_MAGIC && e->code == P5E_TICK) {
+        if (e->va) { TickSet(e->va, e->value); WakeEngine((Device*)adapter); }
+        e->value = 1;
+        return STATUS_SUCCESS;
+    }
+    if (e->magic == P5E_MAGIC && e->code == P5E_COPY) {
+        Device* d = (Device*)adapter;
+        Alloc* s = CookieFind(e->va);
+        Alloc* t = CookieFind(e->value);
+        ULONGLONG n = s && t ? (s->info.bytes < t->info.bytes ? s->info.bytes : t->info.bytes) : 0;
+        UCHAR* sp = s && s->inSeg ? SegPtr(d, s->segAddr >= d->segPhys ? s->segAddr : d->segPhys + s->segAddr, n) : NULL;
+        UCHAR* tp = t && t->inSeg ? SegPtr(d, t->segAddr >= d->segPhys ? t->segAddr : d->segPhys + t->segAddr, n) : NULL;
+        static volatile LONG said;
+        LONG k = InterlockedIncrement(&said);
+        if (!sp || !tp) {
+            if (k <= 20) TraceF("copy escape %I64X -> %I64X: src %p (in %d) dst %p (in %d): not both in the segment", e->va, e->value, s, s ? s->inSeg : -1, t, t ? t->inSeg : -1);
+            e->value = 0;
+            return STATUS_SUCCESS;
+        }
+        CopyWc(tp, sp, (SIZE_T)n);
+        if (k <= 10) TraceF("copy escape: %I64u bytes %I64X -> %I64X", n, s->segAddr, t->segAddr);
+        e->value = n;
+        return STATUS_SUCCESS;
+    }
+    const Ctx* c = arg->hContext && ((const Ctx*)arg->hContext)->magic == kCtxMagic ? (const Ctx*)arg->hContext : NULL;
+    if (e->magic != P5E_MAGIC || e->code != P5E_FENCE_READ || !c) return STATUS_INVALID_PARAMETER;
+    ULONGLONG v = 0;
+    if (!W2Access((Device*)adapter, c->rootSeg, c->root, e->va, &v, FALSE, FALSE)) return STATUS_INVALID_ADDRESS;
+    e->value = v;
+    return STATUS_SUCCESS;
+}
 
 static NTSTATUS APIENTRY DdiControlInterrupt(IN_CONST_HANDLE context, IN_CONST_DXGK_INTERRUPT_TYPE type, IN_BOOLEAN enable)
 {
@@ -2988,6 +3597,15 @@ static NTSTATUS APIENTRY DdiSetVidPnSourceAddress(IN_CONST_HANDLE context, IN_CO
 {
     Tr tr("DdiSetVidPnSourceAddress");
     Device* d = (Device*)context;
+#ifdef P5_VM
+    if (gWddm2) {
+#else
+    if (gWddm2 && KeGetCurrentIrql() <= DISPATCH_LEVEL) {    // MMIO flips arrive at interrupt level: no formatting there
+#endif
+        static volatile LONG said;
+        if (InterlockedIncrement(&said) <= 30)
+            TraceF("source address %I64X segment %u flags %X (alloc %p, visible %ld)", (ULONGLONG)arg->PrimaryAddress.QuadPart, arg->PrimarySegment, arg->Flags.Value, arg->hAllocation, d->visible);
+    }
     d->source = (Alloc*)arg->hAllocation;
     d->sourceAddress = arg->PrimaryAddress;
     InterlockedExchange(&d->sourceChanged, 1);
@@ -3022,6 +3640,133 @@ static NTSTATUS APIENTRY DdiQueryDependentEngineGroup(IN_CONST_HANDLE, INOUT_DXG
     Tr tr("DdiQueryDependentEngineGroup");
     arg->DependentNodeOrdinalMask = 1ull << arg->NodeOrdinal;        // one engine, depending on nothing else
     return STATUS_SUCCESS;
+}
+
+// ---- WDDM 2.0 entry points (registered only in 2.0 mode; every one is non-NULL there, see WDDM2-TABLE.md) ----
+static NTSTATUS APIENTRY W2CreateProcess(IN_CONST_HANDLE, INOUT_PDXGKARG_CREATEPROCESS arg)
+{
+    Tr tr("W2CreateProcess");
+    Proc* p = (Proc*)ExAllocatePool2(POOL_FLAG_NON_PAGED, sizeof(Proc), P5_TAG);
+    if (!p) return STATUS_NO_MEMORY;
+    p->magic = kCtxMagic + 1;
+    p->dxgk = arg->hDxgkProcess;
+    arg->hKmdProcess = p;
+    if (W2Count(W2_PROC) <= 20) TraceF("process created: flags %X", *(const UINT*)&arg->Flags);
+    return STATUS_SUCCESS;
+}
+static NTSTATUS APIENTRY W2DestroyProcess(IN_CONST_HANDLE, IN_CONST_HANDLE process)
+{
+    Tr tr("W2DestroyProcess");
+    if (process && ((const Proc*)process)->magic == kCtxMagic + 1) {
+        ((Proc*)process)->magic = 0;
+        ExFreePoolWithTag((PVOID)process, P5_TAG);
+    }
+    return STATUS_SUCCESS;
+}
+static VOID APIENTRY W2SetRootPageTable(IN_CONST_HANDLE, IN_CONST_PDXGKARG_SETROOTPAGETABLE arg)
+{
+    Tr tr("W2SetRootPageTable");
+    LONG n = W2Count(W2_ROOT);
+    Ctx* c = arg->hContext && ((const Ctx*)arg->hContext)->magic == kCtxMagic ? (Ctx*)arg->hContext : NULL;
+    if (c) {
+        c->rootSeg = arg->Address.SegmentId;
+        c->root = (ULONGLONG)arg->Address.SegmentOffset;
+        c->rootEntries = arg->NumEntries;
+    }
+    if (n <= 20) TraceF("root page table segment %u + %I64X (%u entries) for %s context %p", arg->Address.SegmentId, (ULONGLONG)arg->Address.SegmentOffset, arg->NumEntries, c ? "a virtual" : "a physical", arg->hContext);
+}
+static SIZE_T APIENTRY W2GetRootPageTableSize(IN_CONST_HANDLE, INOUT_PDXGKARG_GETROOTPAGETABLESIZE arg)
+{
+    Tr tr("W2GetRootPageTableSize");       // only asked with two levels; we have four (answered anyway)
+    return (((SIZE_T)arg->NumberOfPte * 8) + PAGE_SIZE - 1) & ~(SIZE_T)(PAGE_SIZE - 1);
+}
+// DMA buffers of virtual contexts and (maybe) paging buffers: the private data holds our Ops as for SubmitCommand.
+// Only paging buffers are trusted to carry them: a user-mode submission's private data comes from the program.
+static NTSTATUS APIENTRY W2SubmitCommandVirtual(IN_CONST_HANDLE context, IN_CONST_PDXGKARG_SUBMITCOMMANDVIRTUAL arg)
+{
+    Tr tr("W2SubmitCommandVirtual");
+    Device* d = (Device*)context;
+    InterlockedExchange(&d->lastSubmitted, (LONG)arg->SubmissionFenceId);
+    LONG k = W2Count(arg->Flags.Paging ? W2_SUBMITV_PAGING : W2_SUBMITV);
+    ULONG n = arg->Flags.Paging && arg->pDmaBufferPrivateData ? arg->DmaBufferPrivateDataSize / sizeof(Op) : 0;
+    Op fence;
+    const Ctx* c = arg->hContext && ((const Ctx*)arg->hContext)->magic == kCtxMagic ? (const Ctx*)arg->hContext : NULL;
+    if (!arg->Flags.Paging && c && arg->pDmaBufferPrivateData && arg->DmaBufferPrivateDataSize >= sizeof(Op)) {
+        // A program's private data: only "write this value at this GPU address" is taken, nothing else of it.
+        const Op* in = (const Op*)arg->pDmaBufferPrivateData;
+        if (in->magic == OP_MAGIC && in->kind == OP_VACOPY && in->bytes <= 64ull * 1024 * 1024) {
+            RtlZeroMemory(&fence, sizeof fence);
+            fence.magic = OP_MAGIC;
+            fence.kind = OP_VACOPY;
+            fence.dstAddr = in->dstAddr;
+            fence.bytes = in->bytes;
+            fence.rects[0] = in->rects[0];
+            fence.rects[1] = in->rects[1];
+            fence.srcSeg = c->rootSeg;
+            fence.srcAddr = c->root;
+            EnqueueOpsNode(d, gTwoNodes ? arg->NodeOrdinal : 0, arg->SubmissionFenceId, &fence, 1, OP_NOP);
+            return STATUS_SUCCESS;
+        }
+        if (in->magic == OP_MAGIC && in->kind == OP_WAITTICK) {
+            RtlZeroMemory(&fence, sizeof fence);         // only the key and the tick are taken
+            fence.magic = OP_MAGIC;
+            fence.kind = OP_WAITTICK;
+            fence.dstAddr = in->dstAddr;
+            fence.bytes = in->bytes;
+            EnqueueOpsNode(d, gTwoNodes ? arg->NodeOrdinal : 0, arg->SubmissionFenceId, &fence, 1, OP_NOP);
+            return STATUS_SUCCESS;
+        }
+        if (in->magic == OP_MAGIC && in->kind == OP_FENCE) {
+            RtlZeroMemory(&fence, sizeof fence);
+            fence.magic = OP_MAGIC;
+            fence.kind = OP_FENCE;
+            fence.dstAddr = in->dstAddr;
+            fence.bytes = in->bytes;
+            fence.srcSeg = c->rootSeg;
+            fence.srcAddr = c->root;
+            EnqueueOpsNode(d, gTwoNodes ? arg->NodeOrdinal : 0, arg->SubmissionFenceId, &fence, 1, OP_NOP);
+            return STATUS_SUCCESS;
+        }
+    }
+    if (k <= 10)
+        TraceF("submit virtual fence %u: va %I64X size %u, private %u (umd %u) -> %u operations%s, node %u", arg->SubmissionFenceId, (ULONGLONG)arg->DmaBufferVirtualAddress,
+               arg->DmaBufferSize, arg->DmaBufferPrivateDataSize, arg->DmaBufferUmdPrivateDataSize, n, arg->Flags.Paging ? " (paging)" : "", arg->NodeOrdinal);
+    EnqueueOpsNode(d, gTwoNodes ? arg->NodeOrdinal : 0, arg->SubmissionFenceId, n ? (const Op*)arg->pDmaBufferPrivateData : NULL, n, OP_NOP);
+    return STATUS_SUCCESS;
+}
+static NTSTATUS APIENTRY W2RenderGdi(IN_CONST_HANDLE, INOUT_PDXGKARG_RENDERGDI) { Tr tr("W2RenderGdi"); return STATUS_SUCCESS; }   // GDI acceleration is off in 2.0 mode
+static NTSTATUS APIENTRY W2MapCpuHostAperture(IN_CONST_HANDLE, IN_CONST_PDXGKARG_MAPCPUHOSTAPERTURE) { Tr tr("W2MapCpuHostAperture"); return STATUS_NOT_SUPPORTED; }
+static NTSTATUS APIENTRY W2UnmapCpuHostAperture(IN_CONST_HANDLE, IN_CONST_PDXGKARG_UNMAPCPUHOSTAPERTURE) { Tr tr("W2UnmapCpuHostAperture"); return STATUS_NOT_SUPPORTED; }
+static NTSTATUS APIENTRY W2PowerRuntimeSetDeviceHandle(IN_CONST_HANDLE, IN HANDLE) { Tr tr("W2PowerRuntimeSetDeviceHandle"); return STATUS_SUCCESS; }
+static VOID APIENTRY W2SetStablePowerState(IN_CONST_HANDLE, IN_CONST_PDXGKARG_SETSTABLEPOWERSTATE arg) { Tr tr("W2SetStablePowerState"); TraceF("stable power state %u (nothing done)", (ULONG)arg->Enabled); }
+static NTSTATUS APIENTRY W2SetVideoProtectedRegion(IN_CONST_HANDLE, IN_CONST_PDXGKARG_SETVIDEOPROTECTEDREGION) { Tr tr("W2SetVideoProtectedRegion"); return STATUS_NOT_SUPPORTED; }
+// 1.3 entry points the 1.3 registration never filled; in 2.0 mode they are filled too.
+static NTSTATUS APIENTRY W2CalibrateGpuClock(IN_CONST_HANDLE, IN UINT32, IN UINT32, OUT_PDXGKARG_CALIBRATEGPUCLOCK arg)
+{
+    // Our "GPU" clock is the CPU's performance counter (all our work is timed by the CPU).
+    LARGE_INTEGER f, now = KeQueryPerformanceCounter(&f);
+    arg->GpuFrequency = (ULONGLONG)f.QuadPart;
+    arg->GpuClockCounter = (ULONGLONG)now.QuadPart;
+    arg->CpuClockCounter = (ULONGLONG)now.QuadPart;
+    if (W2Count(W2_CLOCK) <= 3) TraceF("gpu clock calibrated: %I64u Hz", (ULONGLONG)f.QuadPart);
+    return STATUS_SUCCESS;
+}
+static NTSTATUS APIENTRY W2FormatHistoryBuffer(IN_CONST_HANDLE, IN DXGKARG_FORMATHISTORYBUFFER*) { return STATUS_SUCCESS; }
+static NTSTATUS APIENTRY W2SetPowerPState(IN_CONST_HANDLE, UINT, UINT) { Tr tr("W2SetPowerPState"); return STATUS_SUCCESS; }
+static NTSTATUS APIENTRY W2ControlInterrupt2(IN_CONST_HANDLE context, IN_CONST_DXGKARG_CONTROLINTERRUPT2 arg)
+{
+    Tr tr("W2ControlInterrupt2");
+    static volatile LONG said;
+    if (KeGetCurrentIrql() <= DISPATCH_LEVEL && InterlockedIncrement(&said) <= 20) TraceF("control interrupt 2: type %u state %u", (ULONG)arg.InterruptType, (ULONG)arg.CrtcVsyncState);
+    if (arg.InterruptType == DXGK_INTERRUPT_CRTC_VSYNC) InterlockedExchange(&((Device*)context)->vsyncOn, arg.CrtcVsyncState == DXGK_VSYNC_ENABLE ? 1 : 0);
+    return STATUS_SUCCESS;
+}
+static void W2Summary()                     // one trace line every 2 s from the engine thread (2.0 mode only)
+{
+    TraceF("wddm2: processes %ld virtual contexts %ld roots %ld | page table updates %ld entries %ld refused %ld | tlb %ld copy %ld residency %ld ctxalloc %ld vxfer %ld vfill %ld other %ld | submitv %ld paging %ld | clock %ld",
+           gW2[W2_PROC], gW2[W2_VCTX], gW2[W2_ROOT], gW2[W2_PTE_CALLS], gW2[W2_PTE_WRITTEN], gW2[W2_PTE_BAD], gW2[W2_TLB], gW2[W2_COPYPTE], gW2[W2_RESID], gW2[W2_CTXALLOC],
+           gW2[W2_VXFER], gW2[W2_VFILL], gW2[W2_OTHER], gW2[W2_SUBMITV], gW2[W2_SUBMITV_PAGING], gW2[W2_CLOCK]);
+    TraceF("wddm2 wait op: waits %u timeouts %u dropped %u parked now %u/%u", gParkWaits, gParkTimeouts, gParkDropped, gParkCount[0], gParkCount[1]);
 }
 
 static VOID APIENTRY FullDpcRoutine(IN_CONST_PVOID context)
@@ -3625,17 +4370,43 @@ extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING registryP
     KeInitializeSpinLock(&gLogLock);
     RegSet(L"GpuBootCapable", 1, FALSE);       // for autostart.cmd: this driver can start the GPU at boot
     ULONG fullSwitch = RegGetSession(L"FullDriver", 0xFFFFFFFF);
+#ifdef P5_VM
+    // VM test build: also a persistent switch (VmFullDriver / VmFullVersion), so the VM can boot straight into a mode.
+    if (fullSwitch == 0xFFFFFFFF) fullSwitch = RegGet(L"VmFullDriver", 0xFFFFFFFF);
+#endif
     gFull = fullSwitch == 1;
     // No explicit switch yet in this Windows session: try the GPU start here (once per session); full mode if it worked.
+#ifndef P5_VM
     if (fullSwitch == 0xFFFFFFFF && RegGetSession(L"BootTried", 0) == 0) gFull = BootStartGpu();
+#endif
     if (gFull) {
         DRIVER_INITIALIZATION_DATA f;
         RtlZeroMemory(&f, sizeof f);
         // WDDM 1.3, as viogpu3d registers (it runs on Windows 10 and 11 that way). The first 1.3 tries on 2026-11-20 were
         // stopped at once, but that was the missing UserModeDriverName in the INF. Registered as 2.0 (FullVersion=20) the
         // console went down right after the segment questions: 2.0 expects GPU virtual addressing, which this is not.
-        gWddm2 = RegGet(L"FullVersion", 13) == 20;
+        // Which model: the volatile Session\FullVersion (dev switch) wins; else the persistent DefaultVersion of the
+        // service key (DX12 release: 20; absent: 13, as before). A persistent 2.0 whose last start never became
+        // trusted (LastVersion 20 with StartPending still set) comes back as 1.3 this time (Wddm2Fallbacks counts it).
+        ULONG sessVer = RegGetSession(L"FullVersion", 0);
+        ULONG defVer = RegGet(L"DefaultVersion", 13);
+        if (!sessVer && defVer == 20 && RegGet(L"StartPending", 0) != 0 && RegGet(L"LastVersion", 13) == 20) {
+            defVer = 13;
+            RegSet(L"Wddm2Fallbacks", RegGet(L"Wddm2Fallbacks", 0) + 1, TRUE);
+            RegSet(L"StartPending", 0, TRUE);                // let the 1.3 start run instead of refusing
+        }
+        gWddm2 = sessVer ? sessVer == 20 : defVer == 20;
+#ifdef P5_VM
+        if (sessVer == 0) gWddm2 = RegGet(L"VmFullVersion", defVer) == 20;
+#endif
         f.Version = gWddm2 ? DXGKDDI_INTERFACE_VERSION_WDDM2_0 : DXGKDDI_INTERFACE_VERSION_WDDM1_3;
+        // two engines (virtual contexts on node 1): Session\NodeGpuMmu with the dev switch, else on with a persistent 2.0
+        gTwoNodes = gWddm2 && (sessVer ? RegGetSession(L"NodeGpuMmu", 0) == 1 : RegGet(L"NodeGpuMmu", 1) == 1);
+        RegSet(L"LastVersion", gWddm2 ? 20 : 13, TRUE);
+        if (gWddm2 && RegGet(L"StartPending", 0) == 0) {    // 2.0: the trace from the very first call on (a crashed start's trace is kept)
+            TraceOpen();
+            LogF("driver entry: registering as WDDM 2.0 (GPU MMU, %u levels)", kPtLevels);
+        }
         f.DxgkDdiAddDevice = DdiAddDevice;
         f.DxgkDdiStartDevice = DdiStartDevice;
         f.DxgkDdiStopDevice = DdiStopDevice;
@@ -3700,7 +4471,28 @@ extern "C" NTSTATUS DriverEntry(PDRIVER_OBJECT driver, PUNICODE_STRING registryP
         f.DxgkDdiStopDeviceAndReleasePostDisplayOwnership = DdiStopDeviceAndReleasePostDisplayOwnership;
         f.DxgkDdiSystemDisplayEnable = DdiSystemDisplayEnable;
         f.DxgkDdiSystemDisplayWrite = DdiSystemDisplayWrite;
+        if (gWddm2) {                           // 2.0: no NULL pointer anywhere in the table (WDDM2-TABLE.md)
+            f.DxgkDdiCalibrateGpuClock = W2CalibrateGpuClock;
+            f.DxgkDdiFormatHistoryBuffer = W2FormatHistoryBuffer;
+            f.DxgkDdiSetPowerPState = W2SetPowerPState;
+            f.DxgkDdiControlInterrupt2 = W2ControlInterrupt2;
+            f.DxgkDdiRenderGdi = W2RenderGdi;
+            f.DxgkDdiSubmitCommandVirtual = W2SubmitCommandVirtual;
+            f.DxgkDdiSetRootPageTable = W2SetRootPageTable;
+            f.DxgkDdiGetRootPageTableSize = W2GetRootPageTableSize;
+            f.DxgkDdiMapCpuHostAperture = W2MapCpuHostAperture;
+            f.DxgkDdiUnmapCpuHostAperture = W2UnmapCpuHostAperture;
+            // Not the two overlay entry points (CheckMultiPlaneOverlaySupport2, SetVidPnSourceAddressWithMultiPlaneOverlay2):
+            // with them registered dxgkrnl sends every flip there (VM 2026-11-23: the stub refused, DWM's flip was
+            // re-issued at each vsync for ever). We have no overlay planes; flips stay on SetVidPnSourceAddress.
+            f.DxgkDdiCreateProcess = W2CreateProcess;
+            f.DxgkDdiDestroyProcess = W2DestroyProcess;
+            f.DxgkDdiPowerRuntimeSetDeviceHandle = W2PowerRuntimeSetDeviceHandle;
+            f.DxgkDdiSetStablePowerState = W2SetStablePowerState;
+            f.DxgkDdiSetVideoProtectedRegion = W2SetVideoProtectedRegion;
+        }
         NTSTATUS fst = DxgkInitialize(driver, registryPath, &f);
+        if (gWddm2) LogF("DxgkInitialize: %08X", (ULONG)fst);
         RegSet(L"EntryStatus", (ULONG)fst, TRUE);
         RegSet(L"EntryFull", 1, TRUE);
         return fst;

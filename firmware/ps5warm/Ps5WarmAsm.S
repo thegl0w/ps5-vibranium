@@ -23,12 +23,93 @@
     .intel_syntax noprefix
 
     .text
-    .globl Ps5WarmSwitch
-    .balign 64
+    .globl Ps5WarmSwitch, Ps5WarmKick, Ps5WarmNmiEntry
+    .balign 256                             /* the three routines below share one page: it is the only page of this
+                                               driver that our own page tables map at the OS's virtual address */
 Ps5WarmSwitch:                              /* rcx = physical address of our PML4, rdx = physical address of the blob */
     cli
     mov     cr3, rcx
     jmp     rdx
+
+/* Hand-over to the boot CPU (2026-11-24). Windows calls ResetSystem on whichever CPU hit a stop error; the stub can
+ * only run on the boot CPU (it parks every other CPU with INIT, and an INIT sends the boot CPU to the reset vector).
+ * So a reset that arrives on another CPU offers the restart to the boot CPU: the C side (warm_hand.h) points the
+ * NMI entry of the OS at Ps5WarmNmiEntry and calls Ps5WarmKick, which sends the boot CPU an NMI and waits.
+ *
+ * Ps5WarmKick (rcx = physical address of our PML4, rdx = physical address of the hand-over word, r8d = APIC id of the
+ * boot CPU, r9 = TSC ticks to wait). Hand-over word: 1 offered, 2 taken by the boot CPU, 3 withdrawn.
+ * Returns eax = 0 on the caller's page tables when the boot CPU did not take over in time. Does not return when it
+ * did: this CPU then waits for the stub's INIT. No stack is used while our page tables are loaded. */
+Ps5WarmKick:
+    cli
+    mov     r10, cr3
+    mov     r11, rdx
+    mov     cr3, rcx                        /* our tables: low memory identity-mapped, this page where the OS has it */
+    mov     ecx, 0x1B
+    rdmsr
+    test    eax, 0x400
+    jnz     1f
+    and     eax, 0xFFFFF000                 /* xAPIC: registers at the APIC base (below 4 GiB) */
+    mov     ecx, r8d
+    shl     ecx, 24
+    mov     dword ptr [rax + 0x310], ecx
+    mov     dword ptr [rax + 0x300], 0x4400 /* NMI, one destination, edge, assert */
+    jmp     2f
+1:  mov     ecx, 0x830                      /* x2APIC: the interrupt command register is one MSR */
+    mov     eax, 0x4400
+    mov     edx, r8d
+    wrmsr
+2:  rdtsc
+    shl     rdx, 32
+    or      rax, rdx
+    add     r9, rax                         /* deadline */
+3:  cmp     dword ptr [r11], 2
+    je      5f
+    pause
+    rdtsc
+    shl     rdx, 32
+    or      rax, rdx
+    cmp     rax, r9
+    jb      3b
+    mov     eax, 1
+    mov     ecx, 3
+    lock cmpxchg dword ptr [r11], ecx       /* withdraw the offer, unless the boot CPU took it this instant */
+    jne     5f
+    mov     cr3, r10
+    xor     eax, eax
+    ret
+5:  cli                                     /* taken: the boot CPU runs the stub and parks this CPU with INIT */
+    hlt
+    jmp     5b
+
+/* Ps5WarmNmiEntry: where the patched NMI entry sends a CPU, still on the OS's page tables. Only the boot CPU, and
+ * only while the offer stands, goes on into the stub (as if ResetSystem had been called on it); anything else stops. */
+Ps5WarmNmiEntry:
+    mov     ecx, 0x1B
+    rdmsr
+    test    eax, 0x100                      /* boot CPU? */
+    jz      9f
+    mov     rdx, [rip + gPs5WarmHand]       /* the hand-over word as this code reaches it */
+    mov     eax, 1
+    mov     ecx, 2
+    lock cmpxchg dword ptr [rdx], ecx
+    jne     9f
+    mov     rcx, [rip + gPs5WarmHand + 8]   /* our PML4 */
+    mov     rdx, [rip + gPs5WarmHand + 16]  /* the blob */
+    jmp     Ps5WarmSwitch
+9:  cli
+    hlt
+    jmp     9b
+    .org    Ps5WarmSwitch + 256, 0xCC       /* fails to assemble if the three routines outgrow the 256 bytes that
+                                               keep them on one page */
+
+    .data
+    .globl gPs5WarmHand
+    .balign 8
+gPs5WarmHand:                               /* written by the C side before the NMI: address of the hand-over word as
+                                               the OS maps it, physical address of our PML4, physical address of the blob */
+    .quad   0, 0, 0
+    .text
 
     .equ TSC_PER_US, 1597                   /* the console's TSC runs at 1596.3 MHz */
     .equ GPU_CP_ME_CNTL, 0x86D8             /* dword 0x21B6 (GC0 0x1260 + 0xF56) */

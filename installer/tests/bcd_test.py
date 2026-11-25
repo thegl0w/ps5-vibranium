@@ -21,7 +21,7 @@ import bcd  # noqa: E402
 from hive import Hive, walk, L  # noqa: E402
 
 SAME_AS_BCDBOOT = ["inherit", "isolatedcontext", "allowedinmemorysettings", "systemroot", "nx", "bootmenupolicy",
-                   "bootstatuspolicy", "nocrashautoreboot", "usefirmwarepcisettings", "path"]
+                   "bootstatuspolicy", "usefirmwarepcisettings", "path"]   # nocrashautoreboot dropped in 1.1 (warm restart)
 
 
 def raw_elements(path):

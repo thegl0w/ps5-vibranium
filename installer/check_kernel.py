@@ -4,7 +4,9 @@
 Usage: check_kernel.py <install.wim> <image index> [--firmware DIR]
 Extracts Windows/System32/ntoskrnl.exe of that image into a temp dir (wimlib's wimextract; pass the WIM inside a
 mounted ISO folder), reads its PE TimeDateStamp and SizeOfImage and compares them with every
-firmware/windows_kstub*.inc (KSTUB_TIMESTAMP / KSTUB_IMAGE_SIZE). Exit 0 = a matching stub exists, 1 = none.
+firmware/windows_kstub*.inc (KSTUB_TIMESTAMP / KSTUB_IMAGE_SIZE). Without a table stub, checks whether the
+firmware's pattern stub applies (lib/kpattern.py, the same four checks as the firmware).
+Exit 0 = table stub or pattern stub (a "PATTERN STUB" line says which), 1 = neither.
 """
 import argparse
 import re
@@ -64,8 +66,17 @@ def main():
         print(f"  {'MATCH' if hit else '     '} {name}: 0x{sts:08x} / 0x{ssz:x}")
         match = match or (hit and name)
     if not match:
-        print("no kernel stub for this kernel: the firmware would report 'Kernel stub: Not Found' (no per-CPU fix)")
-        sys.exit(1)
+        sys.path.insert(0, str(HERE / "lib"))
+        import kpattern
+        why = kpattern.check(data)
+        if why:
+            print(f"no table stub, and the pattern checks fail ({', '.join(why)}): the firmware would stop at a red "
+                  "screen. This Windows can't be used.")
+            sys.exit(1)
+        print("PATTERN STUB: no table stub, but entry, cave, APIC pointer and HAL probe are each found exactly once; "
+              "the firmware patches this kernel with its pattern stub (experimental: not tested on the console with "
+              "this kernel)")
+        sys.exit(0)
     if match != "windows_kstub.inc" and not (a.table or not Path(a.firmware).is_dir()) and \
             not (Path(a.firmware) / "kstub_table.py").is_file():
         print(f"note: the stub exists ({match}) but this firmware tree builds windows_kstub.inc only")

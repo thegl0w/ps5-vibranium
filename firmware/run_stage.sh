@@ -39,23 +39,55 @@ test "$have" = 1
 # kernel this firmware has a stub for. Read ntoskrnl's PE header through a READ-ONLY ntfs3 mount (never rw: a refused
 # rw ntfs3 mount marks the volume dirty), unmount, compare. Mismatch: stop here, Linux keeps running. A volume that
 # cannot be read (e.g. hibernated) only warns: the firmware stops on a missing stub as the second wall.
+# v1.0.1: a kernel NOT in the table is allowed when the firmware's pattern stub fits it (the same four checks as
+# firmware KpatInstall and installer/lib/kpattern.py); otherwise ABORT naming the failed check.
 if [ -n "$winpart" ] && [ -f kstub-table.txt ]; then
   ro=/run/ps5win/winro; mkdir -p "$ro"
   if mount -t ntfs3 -o ro,noexec,nosuid,nodev "$winpart" "$ro" 2>/dev/null; then
-    kid=$(python3 - "$ro/Windows/System32/ntoskrnl.exe" <<'PY' || true
-import struct, sys
-b = open(sys.argv[1], "rb").read(4096)
+    # 2026-11-23: a kernel not in the table gets the firmware's pattern stub when the same four checks pass here
+    # (build/kpattern/kfind.py: entry bytes, POOLCODE cave, HalpLocalApic accessors, HAL probe; each exactly once).
+    kinfo=$(python3 - "$ro/Windows/System32/ntoskrnl.exe" <<'PY' || true
+import re, struct, sys
+b = open(sys.argv[1], "rb").read()
 e = struct.unpack_from("<I", b, 0x3C)[0]
-print("0x%08x 0x%x" % (struct.unpack_from("<I", b, e + 8)[0], struct.unpack_from("<I", b, e + 24 + 56)[0]))
+ts, ep, soi = struct.unpack_from("<I", b, e + 8)[0], struct.unpack_from("<I", b, e + 40)[0], struct.unpack_from("<I", b, e + 80)[0]
+secs = []
+for i in range(struct.unpack_from("<H", b, e + 6)[0]):
+    o = e + 24 + struct.unpack_from("<H", b, e + 20)[0] + 40 * i
+    vs, va, rs, ro = struct.unpack_from("<IIII", b, o + 8)
+    secs.append((b[o:o + 8].rstrip(b"\0"), va, vs, ro, rs, struct.unpack_from("<I", b, o + 36)[0]))
+off = lambda rva: next(ro + rva - va for _, va, vs, ro, rs, _ in secs if va <= rva < va + max(vs, rs))
+rva = lambda o: next(va + o - ro for _, va, vs, ro, rs, _ in secs if ro <= o < ro + rs)
+why = []
+if b[off(ep):off(ep) + 12] != bytes.fromhex("4883ec384c897c24304c8bfc"): why.append("entry")
+cave = [b[ro + vs:ro + min(rs, (vs + 0xFFF) & ~0xFFF)] for n, va, vs, ro, rs, ch in secs
+        if n == b"POOLCODE" and ch & 0x20000020 == 0x20000020 and not ch & 0x02000000 and ((vs + 0xFFF) & ~0xFFF) - vs >= 0x200]
+if len(cave) != 1 or not set(cave[0]) <= {0, 0xCC}: why.append("cave")
+text = [(ro, rs) for n, va, vs, ro, rs, ch in secs if ch & 0x20000000]
+v = {}
+for name, rx in (("r", rb"\x48\x8b\x05(....)\x48\x63\xd1\x8b\x04\x02\xc3"), ("w", rb"\x48\x8b\x05(....)\x4c\x63\xc1\x41\x89\x14\x00\xc3")):
+    v[name] = [rva(m.start()) + 7 + struct.unpack("<i", m.group(1))[0] for ro, rs in text for m in re.compile(rx, re.S).finditer(b, ro, ro + rs)]
+if len(v["r"]) != 1 or v["r"] != v["w"]: why.append("apic")
+def fnv(x):
+    h = 0xcbf29ce484222325
+    for c in x: h = ((h ^ c) * 0x100000001b3) & 0xFFFFFFFFFFFFFFFF
+    return h
+probe = [i for ro, rs in text for i in range(ro, ro + rs - 44) if b[i] == 0xC7 and b[i + 1] == 0x03 and fnv(b[i:i + 44]) == 0xb52d15455196d1b1]
+if len(probe) != 1: why.append("halprobe")
+print("0x%08x 0x%x %s" % (ts, soi, ",".join(why) or "ok"))
 PY
 )
+    kid=${kinfo% *}; kpat=${kinfo##* }
     umount "$ro"
     if findmnt -rn -S "$winpart" >/dev/null; then echo "ABORT: could not unmount the read-only Windows mount"; exit 1; fi
-    if [ -z "$kid" ] || ! grep -q "^$kid " kstub-table.txt; then
-      echo "ABORT: Windows kernel ${kid:-unreadable} has no kernel stub in this firmware (see kstub-table.txt); nothing was loaded, Linux keeps running"
+    if [ -n "$kid" ] && grep -q "^$kid " kstub-table.txt; then
+      echo "Kernel stub: Windows kernel $kid matches $(grep "^$kid " kstub-table.txt | cut -d' ' -f3)"
+    elif [ -n "$kid" ] && [ "$kpat" = ok ]; then
+      echo "Kernel stub: Windows kernel $kid is not in the table; entry, cave, APIC pointer and HAL probe each found once: the firmware uses its pattern stub"
+    else
+      echo "ABORT: Windows kernel ${kid:-unreadable} has no table stub and fails the pattern checks (${kpat:-unreadable}); nothing was loaded, Linux keeps running"
       exit 1
     fi
-    echo "Kernel stub: Windows kernel $kid matches $(grep "^$kid " kstub-table.txt | cut -d' ' -f3)"
   else
     echo "WARNING: could not mount the Windows partition read-only to check its kernel; the firmware checks it again"
   fi

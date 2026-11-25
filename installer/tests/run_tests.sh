@@ -76,7 +76,7 @@ check "answers example: placeholder key refused" 4 "example placeholder" -- $PY 
 check "answers example: keys documented = keys used" 0 -             -- $PY -c '
 import re; from pathlib import Path
 doc = set(re.findall(r"(?m)^#(\w+)=", Path("ps5win-answers.example.txt").read_text()))
-used = {"computer_name", "user_name", "password", "time_zone", "locale", "product_key", "windows_gib"}
+used = {"computer_name", "user_name", "password", "time_zone", "locale", "product_key", "windows_gib", "experimental", "edition"}
 assert doc == used, (doc, used)
 assert len(open("ps5win-answers.example.txt").read().split("\n")) < 60'
 check "XML content (defaults and answers)" 0 -                       -- $PY -c '
@@ -131,6 +131,8 @@ assert b"READ ME FIRST.txt" in f and b"readme-first.txt" in f'
 
 echo "== write path (simulated system)"
 check "writer: order, re-checks, stops"     0 "10 writer scenarios passed" -- $PY tests/writer_test.py
+check "answer file: password blanked"     0 "10 answer-file cases passed" -- $PY tests/answers_test.py
+check "editions + pattern stub checks"    0 "edition/pattern cases passed" -- $PY tests/edition_test.py
 
 echo "== payload (C:\\ps5 tree from this Mac's build outputs)"
 if [ -f ../build/ps5gpu/wddm/ps5wddm.sys ]; then
@@ -146,7 +148,8 @@ if [ -f ../build/ps5gpu/wddm/ps5wddm.sys ]; then
   sed "s#^\(eth.p5eth.cat *| *\)[^ ]*#\1$P/foreign.cat#" $M > "$P/manifest-foreigncat.txt"
   printf -- '-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n' > "$P/testkey.pem"
   { cat $M; echo "gpu\\wddm\\key.pem | $P/testkey.pem | file"; } > "$P/manifest-key.txt"
-  sed "s#^\(gpu.wddm.ps5wddm.cat *| *\)[^ ]*#\1build/pdbfix-backup/ps5wddm.cat#" $M > "$P/manifest-stalecat.txt"
+  MDEV="$P/manifest-devcert.txt"; sed -e "s#build/release-signed/wddm/#build/ps5gpu/wddm-boot/#" -e "s#build/release-signed/eth/#build/cleanroom-p5eth/#" -e "s#build/release-signed/gpu/#build/ps5gpu/#" $M > "$MDEV"   # dev-cert wddm files
+  sed "s#^\(gpu.wddm.ps5wddm.cat *| *\)[^ ]*#\1build/pdbfix-backup/ps5wddm.cat#" "$MDEV" > "$P/manifest-stalecat.txt"
   # a catalog with two equal-length members swapped (same bytes, wrong order) must be refused as unsorted
   python3 -c '
 import sys; sys.path.insert(0, "lib"); import catalog
@@ -157,7 +160,7 @@ pa, pb = bytes(d).index(m[i]), bytes(d).index(m[j])
 d[pa:pa + len(m[i])], d[pb:pb + len(m[j])] = m[j], m[i]
 assert catalog.unsorted(bytes(d)), "swap did not unsort"
 open(sys.argv[1], "wb").write(bytes(d))' "$P/unsorted.cat"
-  sed "s#^\(gpu.wddm.ps5wddm.cat *| *\)[^ ]*#\1$P/unsorted.cat#" $M > "$P/manifest-unsorted.txt"
+  sed "s#^\(gpu.wddm.ps5wddm.cat *| *\)[^ ]*#\1$P/unsorted.cat#" "$MDEV" > "$P/manifest-unsorted.txt"
   python3 -c 'import getpass,sys; open(sys.argv[1],"w").write("C:\\Users\\" + getpass.getuser() + "\\x.pdb\n")' "$P/userpath.txt"
   { cat $M; echo "gpu\\userpath.txt | $P/userpath.txt | file"; } > "$P/manifest-user.txt"
   check "payload builds and checks"        0 "payload OK"            -- $PY build_payload.py "$P/ok"
@@ -280,6 +283,7 @@ print(f"all mapped zones ({len(set(m.TZ.values()))}) are among the image'"'"'s {
       # GPU microcode = the image's copy from linux-firmware-amdgpu (zstd-compressed there), unpacked for the test
       FWD="$S/fw"; mkdir -p "$FWD"
       for z in ../image/collect/kernel/firmware/amdgpu/cyan_skillfish2_*.bin.zst; do zstd -dqf "$z" -o "$FWD/$(basename "${z%.zst}")"; done
+      cp ../release/licenses/LICENSE.amdgpu "$FWD/"   # AMD's licence travels with the microcode (install.py requires it)
       IA=(--media "$ISO" --fixture $F/two-disk.json --firmware-dir $FWD)
       rm -rf "$S/e2e" "$S/e2e2" "$S/e2e3" "$S/e2e4"
       check "install.py dry run end to end"       0 "DRY RUN COMPLETE" -- $PY install.py --dry-run --answers $F/answers-install.txt "${IA[@]}" --payload "$S/payload-ov" --workdir "$S/e2e"
@@ -305,7 +309,7 @@ assert "DISK_SERIAL=T7TARGET0002" in conf' "$S/e2e"
       check "dry run: no microcode refused"       1 "missing in"           -- $PY install.py --dry-run --answers $F/answers-install.txt --media "$ISO" --fixture $F/two-disk.json --firmware-dir "$S/hives" --payload "$S/payload-ov" --workdir "$S/e2e4"
       rm -rf "$S/imgtree" "$S/ar1" "$S/ar2" "$S/ar3" "$S/ar4"; mkdir -p "$S/empty-media"
       # tests build on the newest package with the fixed firmware bundle (boot39dev until boot39 exists)
-      TPKG=../build/boot39; [ -d "$TPKG" ] || TPKG=../build/boot39dev
+      TPKG=../build/boot48   # v1.0.1 launch package: boot47 + the pattern-stub kernel check
       check "bad firmware bundle refused (boot37)" 1 "must not ship"     -- $PY make_image_tree.py "$S/badtree" --package ../build/boot37
       check "image tree builds (/opt/ps5win/installer)" 0 "tree OK"     -- $PY make_image_tree.py "$S/imgtree" --package "$TPKG"
       check "tree: only what the image needs"     0 -                     -- $PY -c '
@@ -340,6 +344,15 @@ assert f("/dev/sda2\n/dev/sdb1\n") == ["/dev/sda2", "/dev/sdb1"]'
   else
     echo "skip kernel/hive/overlay tests (give the mounted ISO folder, e.g. /Volumes/CES_X64FREO_EN-US_DV9)"
   fi
+fi
+if [ -n "${ISO22:-}" ] && [ -f "$ISO22/sources/install.wim" ]; then
+  echo "== 22H2 media (experimental, ISO22=$ISO22)"
+  check "22H2: Pro picked, experimental"      0 "EXPERIMENTAL, image 6" -- $PY find_iso.py "$ISO22"
+  check "22H2: Home refused"                  2 "not in this file"      -- $PY find_iso.py --edition Core "$ISO22"
+  check "22H2: kernel takes the pattern stub" 0 "PATTERN STUB"          -- $PY check_kernel.py "$ISO22/sources/install.wim" 6
+  check "22H2: refused without experimental=yes" 1 "experimental=yes"   -- $PY install.py --dry-run --answers $F/answers-install.txt --media "$ISO22" --fixture $F/two-disk.json --payload-from-build --workdir "$(mktemp -d)"
+else
+  echo "skip 22H2 checks (ISO22=<mounted Win10 22H2 folder>)"
 fi
 echo "$pass passed, $fail failed"
 [ "$fail" = 0 ]

@@ -21,7 +21,8 @@
 STATIC EFI_GUID          mPs5VarGuid = PS5_VAR_GUID;
 STATIC CONST CHAR16      mPs5ThermalName[] = L"Ps5Thermal";
 STATIC CONST CHAR16      mPs5FanModeName[] = L"Ps5FanMode";
-STATIC CONST CHAR16      mPs5WarmName[]    = L"Ps5WarmRestart";   // warm restart: Set 1 byte 0/1, Get 16 bytes {valid, armed, loops, cap}
+STATIC CONST CHAR16      mPs5WarmName[]    = L"Ps5WarmRestart";   // warm restart: Set 1 byte 0/1, Get 16 bytes {valid, armed, loops, cap};
+                                                                // a buffer of 16 + PS5_WARM_DIAG_SIZE also gets stage 1's PCI restore report
 
 STATIC EFI_GET_VARIABLE  mPs5OrigGetVariable = NULL;
 STATIC EFI_SET_VARIABLE  mPs5OrigSetVariable = NULL;
@@ -218,6 +219,7 @@ Ps5GetVariable (
 {
   PS5_THERMAL  Thermal;
   UINT32       Warm[4];
+  STATIC UINT8 WarmLong[sizeof (Warm) + PS5_WARM_DIAG_SIZE];
 
   if (Ps5IsOurVariable (VariableName, VendorGuid, mPs5WarmName)) {
     if (DataSize == NULL) {
@@ -234,8 +236,16 @@ Ps5GetVariable (
     }
 
     Ps5WarmStatus (Warm);
-    CopyMem (Data, Warm, sizeof (Warm));
-    *DataSize = sizeof (Warm);
+    if (*DataSize >= sizeof (WarmLong)) {
+      CopyMem (WarmLong, Warm, sizeof (Warm));
+      Ps5WarmDiag (WarmLong + sizeof (Warm));
+      CopyMem (Data, WarmLong, sizeof (WarmLong));
+      *DataSize = sizeof (WarmLong);
+    } else {
+      CopyMem (Data, Warm, sizeof (Warm));
+      *DataSize = sizeof (Warm);
+    }
+
     if (Attributes != NULL) {
       *Attributes = EFI_VARIABLE_BOOTSERVICE_ACCESS | EFI_VARIABLE_RUNTIME_ACCESS;
     }

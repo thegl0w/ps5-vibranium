@@ -94,26 +94,35 @@ def preflight(r, a):
     r.add("console checks", "FAIL" if probs else "OK", "; ".join(probs))
 
 
-def media(r, a, work):
+def experimental_ok(kv):
+    return kv.get("experimental", "").strip().lower() in ("yes", "1", "true")
+
+
+def media(r, a, work, kv):
     cmd = PY + [str(HERE / "find_iso.py"), "--json"] + (["--block-devices"] if a.block_devices else a.media)
+    if kv.get("edition"):
+        cmd += ["--edition", kv["edition"]]
     p = run(cmd)
     try:
         res = json.loads(p.stdout)["results"]
     except (ValueError, KeyError):
         r.add("find the Windows media", "FAIL", (p.stdout + p.stderr).strip()[-300:])
         return None
-    usable = [x for x in res if x.get("verdict") == "ok"]
+    ok = ("ok", "experimental") if experimental_ok(kv) else ("ok",)
+    usable = [x for x in res if x.get("verdict") in ok]
     if len(usable) != 1:
         why = f"{len(usable)} usable sources" + (f" ({len(res)} looked at)" if res else "")
-        untested = [x for x in res if x.get("verdict") == "untested"]
-        if untested:
-            why += "; refused: kernel build without a firmware stub"
+        if any(x.get("verdict") == "experimental" for x in res) and not experimental_ok(kv):
+            why += "; not the tested Windows (IoT Enterprise LTSC 2021): put experimental=yes in ps5win-answers.txt to try it"
+        refused = [x for x in res if x.get("verdict") == "refuse"]
+        if refused and refused[0].get("reasons"):
+            why += "; " + refused[0]["reasons"][-1]
         r.add("find the Windows media", "FAIL", why)
         return None
     m = usable[0]
     pick = m["pick"]
     r.add("find the Windows media", "OK", f"{m['path']}: image {pick['index']} {pick['name']} 10.0.{pick['BUILD']}."
-          f"{pick['SPBUILD']} {','.join(pick['LANGUAGES'])}")
+          f"{pick['SPBUILD']} {','.join(pick['LANGUAGES'])}" + (" (EXPERIMENTAL)" if m["verdict"] == "experimental" else ""))
     folder = Path(m["path"]) if m["kind"] == "folder" else None
     if folder is None and sys.platform == "linux" and os.geteuid() == 0:
         mnt = Path("/run/ps5inst/iso")
@@ -128,7 +137,7 @@ def media(r, a, work):
               "in Finder and pass /Volumes/<label>, or --extract-wim-to DIR)")
         return None
     return {"wim": str(wim), "index": pick["index"], "language": (pick["LANGUAGES"] or ["en-US"])[0],
-            "build": f"10.0.{pick['BUILD']}.{pick['SPBUILD']}", "media": m["path"]}
+            "build": f"10.0.{pick['BUILD']}.{pick['SPBUILD']}", "media": m["path"], "edition": pick["EDITIONID"]}
 
 
 def extract_wim(r, a, m):
@@ -160,7 +169,7 @@ def extract_wim(r, a, m):
 
 def kernel(r, src):
     p = run(PY + [str(HERE / "check_kernel.py"), src["wim"], str(src["index"])])
-    line = next((l.strip() for l in p.stdout.splitlines() if "MATCH" in l), "")
+    line = next((l.strip() for l in p.stdout.splitlines() if "MATCH" in l or l.startswith("PATTERN STUB")), "")
     r.add("kernel stub for this Windows", "OK" if p.returncode == 0 else "FAIL",
           line.replace("MATCH ", "matches ") if p.returncode == 0 else p.stdout.strip().splitlines()[-1:])
     return p.returncode == 0
@@ -205,7 +214,7 @@ def hives(r, src, work, cert):
 def unattend(r, a, src, work):
     out = work / "unattend.xml"
     cmd = PY + [str(HERE / "make_unattend.py"), "--out", str(out), "--answers", a.answers, "--language",
-                src["language"], "--hive", str(work / "hives/SOFTWARE"), "--json"]
+                src["language"], "--hive", str(work / "hives/SOFTWARE"), "--json", "--edition-id", src["edition"]]
     if a.localtime:
         cmd += ["--localtime", a.localtime]
     p = run(cmd)
@@ -214,7 +223,8 @@ def unattend(r, a, src, work):
         return None
     s = json.loads(p.stdout)
     r.add("unattend.xml", "OK", f"{s['computer_name']}, user {s['user_name']} (password {s['password'].split()[0]}), "
-          f"{s['time_zone']}, {s['locale']}, product key {s['product_key'].split()[0]}")
+          f"{s['time_zone']}, {s['locale']}, product key "
+          f"{s['product_key'] if s['product_key'].startswith('edition') else s['product_key'].split()[0]}")
     return out
 
 
@@ -461,7 +471,7 @@ def main():
     print(f"PS5 Windows installer, {'REAL RUN' if real else 'DRY RUN (nothing is written to any disk)'}; work dir {work}")
     try:
         preflight(r, a)
-        src = media(r, a, work)
+        src = media(r, a, work, kv)
         p = adds = checks = st = None
         if src and kernel(r, src):
             p = plan(r, a, kv, work)

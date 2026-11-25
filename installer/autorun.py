@@ -82,6 +82,62 @@ def iso_source_devices(findmnt_out):
     return sorted({l.strip() for l in findmnt_out.splitlines() if l.strip().startswith("/dev/")})
 
 
+def user_answers(path):
+    """The user's optional answer file as KEY=VALUE (same rules as install.read_kv); {} if absent or unreadable."""
+    kv = {}
+    try:
+        lines = path.read_text(errors="replace").splitlines()
+    except OSError:
+        return kv
+    for line in lines:
+        line = line.strip().lstrip("\ufeff")
+        if line and not line.startswith("#") and "=" in line:
+            k, v = line.split("=", 1)
+            kv[k.strip()] = v.strip()
+    return kv
+
+
+def blank_password(path):
+    """After a successful install, empty every active `password=` line of the user's answer file on PS5ISO (exFAT,
+    readable on any computer). The key stays as an empty `password=` with a comment line above it.
+    Comments, other keys, line endings and a UTF-8 BOM are kept. Written to a temporary file in the same folder,
+    flushed, then renamed over the original. Returns "blanked", "none" (no password set) or "failed: <reason>".
+    The password itself is never shown or logged."""
+    try:
+        raw = path.read_bytes()
+    except OSError as e:
+        return f"failed: cannot read ({e.strerror})"
+    bom = b"\xef\xbb\xbf" if raw.startswith(b"\xef\xbb\xbf") else b""
+    text = raw[len(bom):].decode("utf-8", errors="surrogateescape")
+    out, changed = [], False
+    for line in text.splitlines(keepends=True):
+        body = line.rstrip("\r\n")
+        end = line[len(body):]
+        s = body.strip()
+        if s and not s.startswith("#") and "=" in s and s.split("=", 1)[0].strip() == "password":
+            if s.split("=", 1)[1].strip():
+                # the parsers have no inline comments: the note goes on its own line, the key stays empty
+                body, changed = ("# The installer blanked this password after using it. Set your password in "
+                                 "Windows." + (end or "\n") + "password="), True
+        out.append(body + end)
+    if not changed:
+        return "none"
+    tmp = path.with_name(path.name + ".tmp")
+    try:
+        with open(tmp, "wb") as f:
+            f.write(bom + "".join(out).encode("utf-8", errors="surrogateescape"))
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    except OSError as e:
+        try:
+            tmp.unlink()
+        except OSError:
+            pass
+        return f"failed: cannot write ({e.strerror})"
+    return "blanked"
+
+
 def boot_disk(inv):
     for d in inv["disks"]:
         for p in d["partitions"]:
@@ -162,10 +218,12 @@ def main():
     if not a.dry_run and a.media == str(ISO_MOUNT) and not wait_for_iso_mount(scr):
         scr.say("The PS5ISO partition is not mounted. Nothing was done.")
         return 1
-    p = subprocess.run([sys.executable, "-I", str(HERE / "find_iso.py"), "--json", a.media],
-                       capture_output=True, text=True)
+    user = user_answers(Path(a.media) / "ps5win-answers.txt")
+    exp = user.get("experimental", "").strip().lower() in ("yes", "1", "true")
+    p = subprocess.run([sys.executable, "-I", str(HERE / "find_iso.py"), "--json", a.media]
+                       + (["--edition", user["edition"]] if user.get("edition") else []), capture_output=True, text=True)
     found = json.loads(p.stdout)["results"] if p.stdout.strip().startswith("{") else []
-    usable = [x for x in found if x.get("verdict") == "ok"]
+    usable = [x for x in found if x.get("verdict") in (("ok", "experimental") if exp else ("ok",))]
     if len(usable) != 1:
         scr.say("")
         if not found:
@@ -175,12 +233,19 @@ def main():
                                                       + "; ".join(x.get("reasons", []))))
         if len(usable) > 1:
             scr.say("More than one usable ISO: leave exactly one on PS5ISO.")
+        if not exp and any(x.get("verdict") == "experimental" for x in found):
+            scr.say("This Windows is not the tested one. To try it anyway (experimental), put the line")
+            scr.say("  experimental=yes")
+            scr.say("into ps5win-answers.txt on PS5ISO.")
         scr.say("Copy your own Windows 10 IoT Enterprise LTSC 2021 (x64) ISO onto PS5ISO from the Mac, then start")
         scr.say("this disk again. Nothing was written.")
         return 1
     iso = usable[0]
     scr.say(f"Windows media: {Path(iso['path']).name}, image {iso['pick']['index']} "
             f"({iso['pick']['name']}, 10.0.{iso['pick']['BUILD']}.{iso['pick']['SPBUILD']})")
+    if iso["verdict"] == "experimental":
+        scr.say("EXPERIMENTAL: not the tested Windows (IoT Enterprise LTSC 2021). The firmware patches its kernel by")
+        scr.say("pattern; Windows Update stays off. If it fails, reinstall with the tested ISO.")
 
     # 2. the target: the disk this Linux runs from, with PS5ISO on it
     if a.fixture:
@@ -257,6 +322,19 @@ def main():
     if rc != 0:
         scr.say("\nThe install stopped (see above and the log on PS5ISO). Linux keeps running.")
         return 1
+    # the password is in Windows now; don't leave it readable on PS5ISO (nor in the work copy)
+    if extra.is_file():
+        res = blank_password(extra)
+        if res == "blanked":
+            scr.say("Answer file: password line blanked on PS5ISO (the password is set in Windows).")
+        elif res != "none":
+            scr.say(f"Answer file: could not blank the password line ({res[8:]}). Delete ps5win-answers.txt "
+                    "from PS5ISO on the Mac.")
+    for f in (answers, work / "dry/unattend.xml", work / "real/unattend.xml"):
+        try:
+            f.unlink()
+        except OSError:
+            pass
     if not Path("/etc/ps5win.conf").is_file():
         scr.say("\nInstalled, but /etc/ps5win.conf is missing: not starting Windows.")
         return 1

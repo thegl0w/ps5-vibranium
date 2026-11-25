@@ -117,6 +117,19 @@ def image_zones(hive):
     return out
 
 
+# Microsoft's published KMS client setup keys ("Key Management Services (KMS) client activation and product keys").
+# Only for the experimental non-LTSC editions, so their first start doesn't stop at a product-key page the user can't
+# answer from the console. They pick the edition and do NOT activate Windows (that needs the user's own licence:
+# product_key= in the answer file, or later in Windows). The tested IoT Enterprise LTSC flow uses no key.
+SETUP_KEYS = {
+    "Professional": "W269N-WFGWX-YVC9B-4J6C9-T83GX",
+    "ProfessionalWorkstation": "NRG8B-VKK3Q-CXVCJ-9G2XF-6Q84J",
+    "ProfessionalEducation": "6TP4R-GNPTD-KYYHQ-7B7DP-J447Y",
+    "Education": "NW6C2-QMPVW-D7KKK-3GKT6-VCFB2",
+    "Enterprise": "NPPR9-FWDCX-D2C8J-H872K-2YT43",
+}
+
+
 def settings(a, kv):
     s = {}
     s["computer_name"] = kv.get("computer_name", "PS5WIN")
@@ -146,7 +159,9 @@ def settings(a, kv):
         raise Bad("product_key: five groups of five letters/digits")
     if pk == "XXXXX-XXXXX-XXXXX-XXXXX-XXXXX":
         raise Bad("product_key: still the example placeholder (put your own key, or leave the line commented out)")
-    s["product_key"] = pk
+    s["product_key"], s["key_kind"] = pk, "user" if pk else "none"
+    if not pk and getattr(a, "edition_id", None) in SETUP_KEYS:      # experimental editions: no key prompt in OOBE
+        s["product_key"], s["key_kind"] = SETUP_KEYS[a.edition_id], "setup"
     return s
 
 
@@ -219,6 +234,7 @@ def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--out", required=True)
     ap.add_argument("--answers")
+    ap.add_argument("--edition-id", help="EDITIONID of the image being installed (picks a setup key, see SETUP_KEYS)")
     ap.add_argument("--language", default="en-US")
     ap.add_argument("--localtime", default="/etc/localtime")
     ap.add_argument("--hive")
@@ -232,7 +248,9 @@ def main():
     Path(a.out).write_bytes(build(s))
     shown = {k: v for k, v in s.items() if k not in ("password", "product_key")}
     shown["password"] = "set" if s["password"] else "none (empty, as today's install)"
-    shown["product_key"] = "set" if s["product_key"] else "none (not activated)"
+    shown["product_key"] = {"user": "set", "setup": "edition setup key (not activated)"}.get(
+        s["key_kind"], "none (not activated)")
+    shown.pop("key_kind", None)
     if a.json:
         print(json.dumps(shown, indent=1))
     else:

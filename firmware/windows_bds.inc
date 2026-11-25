@@ -276,6 +276,7 @@ STATIC VOID WarmTest3a (VOID)
   Blk = WARM_REC64 (0x50);
   if (Loops >= 1) {
     WARM_REC32 (0x40) = 0;                               // disarm: Windows starts unarmed after the test
+    WARM_REC32 (0x2C) &= ~1U;                            // the test is over: later warm runs (Windows' Restart) keep their arming
     if (Blk != 0) *(volatile UINT32 *)(UINTN)(Blk + 0x80) = 0;
     WarmShowBox (0, 200, 0);
     Print (L"\r\n==== WARM RESTART TEST 3a: PASS 2 (loop %u, last stub step %u). The firmware started again without a power\r\n"
@@ -310,6 +311,164 @@ STATIC VOID WarmTest3a (VOID)
   Print (L"==== WARM RESTART TEST 3a: ExitBootServices failed. Disarmed; going on to Windows.\r\n");
 }
 
+// Warm restart: what stage 1 found in the PCI state Windows left, and what it did about it (firmware/ps5warm/warm_pci.h,
+// report at record + 0x800: magic "WPD1", stage run, xHCI count, bus 0x20 D-states, two root-port entries of 0x20 at
+// +0x10, four xHCI entries of 0x30 at +0x50). Shown on warm runs only, under the USB search result, so it stays on
+// screen when the boot stops there. Configuration reads only, and only of the functions named in the report.
+STATIC UINT32 WarmCfg (UINT32 Bdf, UINT32 Off)
+{
+  IoWrite32 (0xCF8, 0x80000000U | (Bdf << 8) | (Off & 0xFC));
+  return IoRead32 (0xCFC);
+}
+STATIC VOID WarmPciReport (VOID)
+{
+  UINT32 I, N;
+  if (!PS5_WARM_ENABLED) return;
+  if (WARM_REC64 (0x00) != 0x3143455257355350ULL || WARM_REC32 (0x4C) < 2 || WARM_REC32 (0x800) != 0x31445057U) return;
+  N = WARM_REC32 (0x808);
+  Print (L"Warm restart, loop %u (stage run %u): PCI state as Windows left it -> what stage 1 did. Bus 20 D-states %08x.\r\n",
+         WARM_REC32 (0x44), WARM_REC32 (0x804), WARM_REC32 (0x80C));
+  for (I = 0; I < 2; I++) {
+    UINT32 O = 0x810 + I * 0x20, Bdf = WARM_REC32 (O);
+    if (Bdf == 0) continue;
+    Print (L"  root port %02x:%02x.%x found cmd %04x buses %06x window %08x pm %04x; flags %03x%s; now cmd %04x buses %06x\r\n",
+           Bdf >> 8, (Bdf >> 3) & 31, Bdf & 7, WARM_REC32 (O + 4) & 0xFFFF, WARM_REC32 (O + 8) & 0xFFFFFF, WARM_REC32 (O + 12),
+           WARM_REC32 (O + 16) & 0xFFFF, WARM_REC32 (O + 20), (WARM_REC32 (O + 20) & 8) ? L" (restored)" : L"",
+           WarmCfg (Bdf, 4) & 0xFFFF, WarmCfg (Bdf, 0x18) & 0xFFFFFF);
+  }
+  for (I = 0; I < N && I < 4; I++) {
+    UINT32 O = 0x850 + I * 0x30, Bdf = WARM_REC32 (O), F = WARM_REC32 (O + 16);
+    Print (L"  xhci %02x:%02x.%x found cmd %04x pm %04x bar %08x; flags %03x:%s%s%s%s%s%s %s (%u us), usbsts %08x\r\n",
+           Bdf >> 8, (Bdf >> 3) & 31, Bdf & 7, WARM_REC32 (O + 4) & 0xFFFF, WARM_REC32 (O + 8) & 0xFFFF, WARM_REC32 (O + 12), F,
+           (F & 2) ? L" was asleep," : L" was in D0,", (F & 4) ? L"" : L" NOT D0 NOW,", (F & 8) ? L" header restored," : L"",
+           (F & 0x10) ? L" vendor bytes restored," : L"", (F & 0x400) ? L" power-cycled," : L"", (F & 0x20) ? L"" : L" REGISTERS DEAD,",
+           (F & 0x80) ? L"reset ok" : (F & 0x800) ? L"halted, not reset" : L"reset FAILED", WARM_REC32 (O + 24), WARM_REC32 (O + 20));
+    if ((F & 0x1000) != 0) {
+      Print (L"       disk re-plugged by port power: %s while off, %s", (F & 0x2000) ? L"gone" : L"STAYED CONNECTED",
+             (F & 0x4000) ? L"back after " : L"NOT BACK\r\n");
+      if ((F & 0x4000) != 0) Print (L"%u ms\r\n", WARM_REC32 (O + 24) / 1000);
+    }
+    Print (L"       %u ports after stage 1: %08x %08x %08x %08x (bit 0 = connected)\r\n",
+           WARM_REC32 (O + 28), WARM_REC32 (O + 32), WARM_REC32 (O + 36), WARM_REC32 (O + 40), WARM_REC32 (O + 44));
+    {
+      // The same function right now (read only): is it decoded, running, and does a port see the disk?
+      UINT32 Cmd = WarmCfg (Bdf, 4) & 0xFFFF, Bar = WarmCfg (Bdf, 0x10);
+      volatile UINT8 *B = (volatile UINT8 *)(UINTN)(Bar & 0xFFFFFFF0U);
+      if ((Cmd & 2) != 0 && (Bar & 0xFFFFFFF0U) != 0 && (Bar & 1) == 0 && WarmCfg (Bdf, 0x14) == 0 &&
+          *(volatile UINT32 *)B != 0xFFFFFFFFU && B[0] >= 0x10) {
+        volatile UINT32 *Op = (volatile UINT32 *)(B + B[0]);
+        Print (L"       now: cmd %04x bar %08x usbcmd %08x usbsts %08x ports %08x %08x %08x %08x\r\n", Cmd, Bar, Op[0], Op[1],
+               Op[0x100], Op[0x104], Op[0x108], Op[0x10C]);
+      } else {
+        Print (L"       now: cmd %04x bar %08x, registers not readable\r\n", Cmd, Bar);
+      }
+    }
+  }
+}
+
+// Warm restart evidence that needs no screen and survives a power cut (2026-11-24, after the boot49w Restart that left
+// nothing to read): every run that finds the boot partition appends its identity to the boot log \ps5-boot22.txt
+// (append-only, never truncated) as its FIRST disk write, and writes the same lines into the trace. "stage run 1" came
+// from Linux; a higher number came from a Restart without a power cycle, and then stage 1's PCI report follows (what
+// Windows left, what was restored). Before this a warm run looked exactly like a launch in both files.
+STATIC CHAR8 mWarmText[3072];
+STATIC UINTN mWarmTextLen;
+STATIC VOID WarmEvidence (EFI_HANDLE Target, UINT32 HalfSeconds)
+{
+  UINTN  N = 0;
+  UINT32 I, Run;
+  mWarmTextLen = 0;
+  if (!PS5_WARM_ENABLED || WARM_REC64 (0x00) != 0x3143455257355350ULL) return;
+  Run = WARM_REC32 (0x4C);
+  N += AsciiSPrint (mWarmText + N, sizeof (mWarmText) - N,
+         "Warm: stage run %u (%a%a), loop %u, armed %u, flags %x, last stub step %x; boot partition found after %u.%u s.\r\n",
+         Run, Run < 2 ? "launch from Linux" : (WARM_REC32 (0x2C) & 1) ? "firmware-only loop" : "Restart without a power cycle",
+         (WARM_REC32 (0x40) & 0x100) ? ", handed to the boot CPU from another CPU" : "", WARM_REC32 (0x44), WARM_REC32 (0x40) & 0xFF,
+         WARM_REC32 (0x2C), WARM_REC32 (0x58), HalfSeconds / 2, HalfSeconds % 2 * 5);
+  if (Run >= 2 && WARM_REC32 (0x800) == 0x31445057U) {
+    N += AsciiSPrint (mWarmText + N, sizeof (mWarmText) - N, "Warm: stage 1 report of run %u: bus 20 D-states %08x.\r\n",
+           WARM_REC32 (0x804), WARM_REC32 (0x80C));
+    for (I = 0; I < 2 && N + 200 < sizeof (mWarmText); I++) {
+      UINT32 O = 0x810 + I * 0x20, Bdf = WARM_REC32 (O);
+      if (Bdf == 0) continue;
+      N += AsciiSPrint (mWarmText + N, sizeof (mWarmText) - N,
+             "Warm: root port %02x:%02x.%x found cmd %04x buses %06x window %08x pm %04x flags %03x.\r\n",
+             Bdf >> 8, (Bdf >> 3) & 31, Bdf & 7, WARM_REC32 (O + 4) & 0xFFFF, WARM_REC32 (O + 8) & 0xFFFFFF, WARM_REC32 (O + 12),
+             WARM_REC32 (O + 16) & 0xFFFF, WARM_REC32 (O + 20));
+    }
+    for (I = 0; I < WARM_REC32 (0x808) && I < 4 && N + 260 < sizeof (mWarmText); I++) {
+      UINT32 O = 0x850 + I * 0x30, Bdf = WARM_REC32 (O);
+      N += AsciiSPrint (mWarmText + N, sizeof (mWarmText) - N,
+             "Warm: xhci %02x:%02x.%x found cmd %04x pm %04x bar %08x flags %03x reset %u us usbsts %08x ports(%u) %08x %08x %08x %08x.\r\n",
+             Bdf >> 8, (Bdf >> 3) & 31, Bdf & 7, WARM_REC32 (O + 4) & 0xFFFF, WARM_REC32 (O + 8) & 0xFFFF, WARM_REC32 (O + 12),
+             WARM_REC32 (O + 16), WARM_REC32 (O + 24), WARM_REC32 (O + 20), WARM_REC32 (O + 28), WARM_REC32 (O + 32),
+             WARM_REC32 (O + 36), WARM_REC32 (O + 40), WARM_REC32 (O + 44));
+    }
+  }
+  // Every run, launches from Linux included (so a good and a bad start can be compared): each xHCI of stage 1's snapshot
+  // as it is right now, after this firmware's own driver has reset it and found the disk. PORTSC bit 0 = connected,
+  // bit 1 = enabled, bits 13:10 = speed (4 = 5 Gbit/s, 3 = 480 Mbit/s). Reads only.
+  if (WARM_REC32 (0x100) == 0x31475057U && WARM_REC32 (0x104) <= 6) {
+    for (I = 0; I < WARM_REC32 (0x104) && N + 200 < sizeof (mWarmText); I++) {
+      UINT32 E = 0x110 + I * 0x110, Bdf = WARM_REC32 (E), Cmd, Bar;
+      volatile UINT8 *B;
+      if (WARM_REC32 (E + 8) != 2) continue;
+      Cmd = WarmCfg (Bdf, 4) & 0xFFFF;
+      Bar = WarmCfg (Bdf, 0x10);
+      B   = (volatile UINT8 *)(UINTN)(Bar & 0xFFFFFFF0U);
+      if ((Cmd & 2) != 0 && (Bar & 0xFFFFFFF0U) != 0 && (Bar & 1) == 0 && WarmCfg (Bdf, 0x14) == 0 &&
+          *(volatile UINT32 *)B != 0xFFFFFFFFU && B[0] >= 0x10) {
+        volatile UINT32 *Op = (volatile UINT32 *)(B + B[0]);
+        N += AsciiSPrint (mWarmText + N, sizeof (mWarmText) - N,
+               "Warm: now xhci %02x:%02x.%x cmd %04x bar %08x usbcmd %08x usbsts %08x ports %08x %08x %08x %08x.\r\n",
+               Bdf >> 8, (Bdf >> 3) & 31, Bdf & 7, Cmd, Bar, Op[0], Op[1], Op[0x100], Op[0x104], Op[0x108], Op[0x10C]);
+      } else {
+        N += AsciiSPrint (mWarmText + N, sizeof (mWarmText) - N, "Warm: now xhci %02x:%02x.%x cmd %04x bar %08x, registers not readable.\r\n",
+               Bdf >> 8, (Bdf >> 3) & 31, Bdf & 7, Cmd, Bar);
+      }
+    }
+  }
+  mWarmTextLen = N;
+  BootMark (Target, mWarmText);                           // best effort, like every boot log line
+}
+
+// A start that came from a Restart without a power cycle and cannot start Windows (no boot partition, or the boot
+// manager came back) must not sit here until someone holds the power button: after two minutes for reading the screen
+// it restarts the console the normal way (through the console's own system), as an unarmed Restart does. Without a
+// screen that outcome also says how far the run got: a normal restart by itself = the firmware ran but Windows could
+// not be started; none = stopped elsewhere.
+STATIC VOID WarmFallback (VOID)
+{
+  STATIC UINT8 Map[0x10000];
+  UINT64 Blk;
+  UINT32 S;
+  UINTN  Try;
+  if (!PS5_WARM_ENABLED || WARM_REC64 (0x00) != 0x3143455257355350ULL || WARM_REC32 (0x4C) < 2) return;
+  Print (L"\r\nThis start came from a Restart without a power cycle (stage run %u) and Windows could not be started.\r\n"
+         L"The console restarts in 120 s; then start the loader again. Hold the power button to turn it off instead.\r\n",
+         WARM_REC32 (0x4C));
+  for (S = 120; S > 0; S -= 10) {
+    Print (L" %u", S);
+    gBS->Stall (10000000);
+  }
+  WARM_REC32 (0x40) = 0;                                   // disarm: the reset below must go to the console's controller
+  Blk = WARM_REC64 (0x50);
+  if (Blk != 0) *(volatile UINT32 *)(UINTN)(Blk + 0x80) = 0;
+  TraceFlush (TRUE);
+  mExited = TRUE;                                          // no trace writes from here on
+  if (mOrigReset != NULL) gRT->ResetSystem = mOrigReset;   // the real services, not the trace hooks (TraceInstall may have run)
+  for (Try = 0; Try < 3; Try++) {
+    UINTN Size = sizeof (Map), Key = 0, DescSize = 0;
+    UINT32 Ver = 0;
+    if (EFI_ERROR ((mOrigMap != NULL ? mOrigMap : gBS->GetMemoryMap) (&Size, (EFI_MEMORY_DESCRIPTOR *)Map, &Key, &DescSize, &Ver))) continue;
+    if (!EFI_ERROR ((mOrigEbs != NULL ? mOrigEbs : gBS->ExitBootServices) (gImageHandle, Key))) {
+      gRT->ResetSystem (EfiResetCold, EFI_SUCCESS, 0, NULL);
+      CpuDeadLoop ();
+    }
+  }
+  Print (L"\r\nCould not end boot services for the restart. Hold the power button to turn the console off.\r\n");
+}
+
 STATIC VOID WindowsBoot (VOID)
 {
   EFI_HANDLE Target = NULL, EfiPart = NULL, SsdPart = NULL;
@@ -337,6 +496,7 @@ STATIC VOID WindowsBoot (VOID)
   Print (L"Boot 28: Windows boot partition %s, boot manager on it %s, installer disk %s.\r\n",
          SsdPart != NULL ? L"found" : L"NOT found", SsdMode ? L"found" : L"NOT found",
          Target != NULL ? L"found" : L"not there");
+  WarmPciReport ();                                      // warm runs only: the PCI state Windows left and what stage 1 did
   if (SsdMode) {
     Target = SsdPart;
     EfiPart = SsdPart;
@@ -344,6 +504,7 @@ STATIC VOID WindowsBoot (VOID)
   if (Target != NULL) {
     EFI_BOOT_MANAGER_LOAD_OPTION Option;
     CHAR8 Message[128];
+    WarmEvidence (Target, (UINT32)Try);                  // first disk write of the run: which run this is (boot log)
     if (!WindowsMapSafe () || !WindowsAcpiSafe ()) {
       BootMark (Target, "Stopped: memory map or ACPI verification failed.\r\n");
       Print (L"Stopped: Windows memory or PCI map check failed.\r\n");
@@ -378,6 +539,12 @@ STATIC VOID WindowsBoot (VOID)
           // (HAL I/O APIC patch, kernel stub). It used to run only when a trace file could be created, so once all 9
           // trace slots on PS5BOOT were used, Windows started without the PS5 fixes and hung at the logo (Nov 20-22).
           TraceInstall ();
+          if (mWarmTextLen != 0) {                         // the same identity lines in the trace (slot 9 is reused by every run)
+            TraceEvent ("Warm restart state of this run: ");
+            TraceRaw ("\r\n", 2);
+            TraceRaw (mWarmText, mWarmTextLen);
+            TraceFlush (TRUE);
+          }
           // Boot 29: hand Windows a clean, black screen. Windows draws only its logo and dots over the picture it is
           // given, so stage 1's text, this firmware's log ring and its marks stayed visible under the logo. The log
           // ring stops drawing (flag read by Ps5FbSerialPortLib) and the whole picture is filled with black; the trace
@@ -406,5 +573,6 @@ STATIC VOID WindowsBoot (VOID)
     Status = EFI_NOT_FOUND;
   }
   Print (L"Windows boot stopped: %r\r\n", Status);
+  WarmFallback ();                                       // warm runs only: a normal restart after two minutes instead of a dead end
   CpuDeadLoop ();
 }

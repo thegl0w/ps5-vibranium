@@ -92,11 +92,14 @@ def probe_dir(path, want_hash):
     return r
 
 
+EDITION = None   # --edition (the answer file's edition=)
+
+
 def _finish(r, info, images):
     r["wim"] = {k: info[k] for k in ("compression", "image_count", "total_parts", "pipable")}
     r["images"] = [{k: i[k] for k in ("index", "name", "EDITIONID", "ARCH", "BUILD", "SPBUILD", "LANGUAGES")}
                    for i in images]
-    img, verdict, reasons = wim.pick_edition(info, images)
+    img, verdict, reasons = wim.pick_edition(info, images, EDITION)
     r["verdict"] = verdict
     r["reasons"] = reasons
     r["pick"] = img and {k: img[k] for k in ("index", "name", "EDITIONID", "BUILD", "SPBUILD", "LANGUAGES",
@@ -199,7 +202,10 @@ def main():
     ap.add_argument("--exclude-serial", action="append", default=[], help="never scan this disk (the target)")
     ap.add_argument("--hash", action="store_true", help="also SHA-256 the ISO / WIM (reads the whole file)")
     ap.add_argument("--json", action="store_true")
+    ap.add_argument("--edition", help="edition to take (EDITIONID or image name); default: lib/wim.py EDITIONS order")
     a = ap.parse_args()
+    global EDITION
+    EDITION = a.edition
     if a.block_devices:
         results = scan_block_devices(a.hash, set(a.exclude_serial))
     else:
@@ -212,7 +218,7 @@ def main():
                 if key not in seen:
                     seen.add(key)
                     results.append(probe(c, a.hash))
-    usable = [r for r in results if r.get("verdict") in ("ok", "untested")]
+    usable = [r for r in results if r.get("verdict") in ("ok", "experimental")]
     if a.json:
         print(json.dumps({"results": results, "usable": len(usable)}, indent=2))
     else:

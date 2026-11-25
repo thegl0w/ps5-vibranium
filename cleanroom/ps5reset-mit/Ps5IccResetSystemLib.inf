@@ -25,6 +25,8 @@
   Ps5Warm.h
   Ps5Warm.c
   Ps5WarmAsm.S
+  warm_pci.h
+  warm_hand.h
 
 [Packages]
   MdePkg/MdePkg.dec

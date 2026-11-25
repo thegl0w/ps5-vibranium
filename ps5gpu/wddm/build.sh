@@ -26,7 +26,8 @@ LF="/nologo /driver /merge:_guard_check_icall_=.rdata /merge:_guard_dispatch_ica
 # ps5wddm.sys: the driver, with its own stack-cookie check (no bufferoverflowfastfailk.lib, so no load configuration block).
 "$LLVM/clang-cl" $CF /std:c++17 -Wno-unused-const-variable "${GINC[@]}" "${INC[@]}" /Fo"$out/gpuboot.obj" gpuboot.cpp
 "$LLVM/clang-cl" $CF /std:c++17 "${GINC[@]}" "${INC[@]}" /Fo"$out/CyanDirectLoad.obj" "$MC/CyanDirectLoad.cpp"
-"$LLVM/clang-cl" $CF /std:c++17 /DP5_OWN_COOKIE "${INC[@]}" /Fo"$out/ps5wddm.obj" ps5wddm.cpp
+DIAGF=""; [ "${DIAG:-0}" = 1 ] && DIAGF="/DP5_DIAG_FBREAD"   # DIAG=1: diagnostics build (fbshot escape); never for a release
+"$LLVM/clang-cl" $CF /std:c++17 /DP5_OWN_COOKIE $DIAGF "${INC[@]}" /Fo"$out/ps5wddm.obj" ps5wddm.cpp
 "$LLD/lld-link" $LF /entry:DriverEntry /out:"$out/ps5wddm-unsigned.sys" /map:"$out/ps5wddm.map" /pdb:"$out/ps5wddm.pdb" /debug \
   "$out/ps5wddm.obj" "$out/gpuboot.obj" "$out/CyanDirectLoad.obj" "$L/displib.lib" "$L/ntoskrnl.lib" "$L/hal.lib"
 # Diagnostic variants for the VM: "a" = Microsoft's cookie library and entry point (as first tried); p5min = an empty driver.

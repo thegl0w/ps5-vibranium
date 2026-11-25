@@ -8,6 +8,7 @@ src=../ps5-hackintosh
 mkdir -p build/stage/bringup build/stage/tools
 cp -R "$src/bringup/." build/stage/bringup/
 cp "$src/tools/llvm.sh" build/stage/tools/
+cp firmware/ps5warm/warm_pci.h build/stage/bringup/      # ps5win warm restart: PCI snapshot/restore (2026-11-24)
 python3 - <<'PY'
 from pathlib import Path
 p = Path("build/stage/bringup/stub.c")
@@ -61,6 +62,10 @@ rep("    if (fbpatch) *(volatile u64 *)fbpatch = gopfb;\n",
 #  - every run writes the hand-over record at 0x3000F0000 (layout: firmware/ps5warm/Ps5Warm.h, REC_*), which tells
 #    the firmware where to come back to. A run from Linux starts it unarmed, loop 0, cap 20; launch option
 #    ps5warm=3a on the kexec command line sets the firmware-only loop test flag.
+#  - (2026-11-24, after console experiment 3b found no USB device on the second run) firmware/ps5warm/warm_pci.h: a
+#    run from Linux saves the configuration space of the two root ports and the xHCIs of bus 0x20 in the record page;
+#    a warm run puts them back (D0, BARs, decoding, the Salina root port's routing), resets each xHCI and prints what
+#    it found. The firmware does no PCI enumeration, so it needs the state the first run had.
 rep("void stage1_main(u64 boot_params)\n{\n    volatile u32 *init_size = (volatile u32 *)(unsigned long)(boot_params + 0x260);\n    *init_size -= STUB_SIZE;\n",
     "void stage1_main(u64 boot_params, u64 warm)\n{\n    volatile u32 *init_size = (volatile u32 *)(unsigned long)(boot_params + 0x260);\n"
     "    if (!warm) *init_size -= STUB_SIZE;              /* ps5win: only once (a warm re-entry runs this again) */\n"
@@ -69,6 +74,18 @@ rep("static void stage5_launch(u64 bp)\n{\n", """#define PS5_WARM_RECORD 0x3000F
 #define PS5_WARM_RECORD_MAGIC 0x3143455257355350ULL     /* "PS5WREC1" */
 #define WREC32(o) (*(volatile u32 *)(PS5_WARM_RECORD + (o)))
 #define WREC64(o) (*(volatile u64 *)(PS5_WARM_RECORD + (o)))
+
+/* ps5win warm restart: PCI state of the first run, saved and put back (see warm_pci.h). */
+#define WP_CFG_RD(b, d, f, off)     pci_cfg(b, d, f, off)
+#define WP_CFG_WR(b, d, f, off, v)  pci_wr32(b, d, f, off, v)
+#define WP_RD8(a)                   (*(volatile u8 *)(a))
+#define WP_RD32(a)                  (*(volatile u32 *)(a))
+#define WP_WR32(a, v)               (*(volatile u32 *)(a) = (v))
+#define WP_DELAY_US(us)             wait_tsc((u64)(us) * 1597u)      /* the console's TSC: 1596.3 MHz */
+#define WP_PUTS(s)                  puts_(s)
+#define WP_HEX(v, d)                put_hex(v, d)
+#define WP_REC                      PS5_WARM_RECORD
+#include "warm_pci.h"
 
 /* ps5win: a warm re-entry finds the static variables as the first run left them; set every one explicitly. */
 static void stage_reset_statics(void)
@@ -144,6 +161,10 @@ s = s[:a] + """    /* ps5win warm restart: the hand-over record (replaces the ol
         puts_("warm-restart record: entry "); put_hex(WREC64(0x08), 12); puts_(" boot_params "); put_hex(bp, 12);
         puts_(" armed "); put_hex(armed, 1); puts_(" loops "); put_hex(loops, 4); puts_(" flags "); put_hex(flags, 2); puts_("\\n");
     }
+    /* ps5win warm restart: the firmware takes every BAR, window and power state as it finds it. A run from Linux saves
+     * that state (reads only); a warm run puts back what Windows' shutdown changed and resets the xHCIs. After
+     * quiesce_pci on both paths, so the saved state has MSI/MSI-X off. */
+    if (warm) wp_restore(WREC32(0x4C)); else wp_snapshot();
 """ + s[b:]
 rep("""        carve_from_bundle(boot_params);
         u64 fbaddr = find_fb();

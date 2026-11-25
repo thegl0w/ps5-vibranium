@@ -19,7 +19,7 @@ same class of problem: things that fill up or grow until a later boot fails.
 
 ## Test 1: 30+ boots on one install
 
-- Cycle: Windows Start → Restart (back to PS5 OS) → start the PS5 Linux loader → the image starts Windows by itself. About 3 minutes
+- Cycle: Windows Start → Restart → start the PS5 Linux loader → the image starts Windows by itself. About 3 minutes
   per cycle; each one needs the loader started by hand. Mix in a few Shut downs (power off, then a normal start).
 - Pass: every cycle reaches the desktop; PS5BOOT free space stops shrinking once all 9 trace slots exist (about
   24 MiB + 1 MiB per boot until then); no size column grows without bound.

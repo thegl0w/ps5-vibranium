@@ -8,7 +8,11 @@
 # and the Wi-Fi driver p5net (its MT7921 core carries recorded join frames of the user's own networks; a scanning
 # Wi-Fi driver configured inside Windows replaces it later). build_payload.py refuses any file holding those details.
 
-gpu\ps5gpu.sys                 | build/ps5gpu/ps5gpu.sys                                              | driver
+# Signed files (ps5gpu.sys, ps5wddm.sys/.cat, p5eth.sys/.cat, ps5test.cer): since 2026-11-23 (v1.0.1) the SAME code
+# re-signed with the release cert "PS5GPU Test Signing 2000" (valid 2000..2099, so a reset console clock still trusts
+# it) by tools/resign-release.sh into build/release-signed; catalog content unchanged. Sources it re-signs:
+# build/ps5gpu/ps5gpu.sys, build/ps5gpu/wddm-boot/*, build/cleanroom-p5eth/*. The dev cert (build/ps5gpu) is separate.
+gpu\ps5gpu.sys                 | build/release-signed/gpu/ps5gpu.sys                                  | driver
 gpu\ps5gpu.exe                 | build/ps5gpu/ps5gpu.exe                                              | file
 gpu\ps5gpu2.exe                | build/cleanroom-ps5gpu2/ps5gpu2.exe                                  | file
 gpu\start.cmd                  | ps5gpu/win/start.cmd                                                 | script
@@ -18,23 +22,38 @@ gpu\autostart.cmd              | installer/payload/pinned/autostart.cmd         
 gpu\wddm-mode.cmd              | ps5gpu/win/wddm-mode.cmd                                             | script
 gpu\gdi-mode.cmd               | ps5gpu/win/gdi-mode.cmd                                              | script
 gpu\gpu-recover.cmd            | ps5gpu/win/gpu-recover.cmd                                           | script
-# display driver: build 0.3.1122.4977 (build/ps5gpu/wddm-boot, sys e6cbca2e): the driver the dev box ran since
+# v1.0.1: native Direct3D 12 (WDDM 2.0, default) on / off switch; no admin needed (autostart.cmd applies the choice)
+gpu\dx12-native-on.cmd        | installer/payload/setup/dx12-native-on.cmd                          | script
+gpu\dx12-native-off.cmd       | installer/payload/setup/dx12-native-off.cmd                         | script
+gpu\warm-restart-on.cmd       | installer/payload/warm/warm-restart-on.cmd                          | script
+gpu\warm-restart-off.cmd      | installer/payload/warm/warm-restart-off.cmd                         | script
+# display driver (v1.0.1): the DX12 release package build/dx12-release/wddm (WDDM 2.0 default via DefaultVersion=20,
+# 1.3 fallback; DriverVer 31.0.1123.1), re-signed into build/release-signed. Previously: build 0.3.1122.4977 (build/ps5gpu/wddm-boot, sys e6cbca2e): the driver the dev box ran since
 # 2026-11-22 (incl. the no-blink boot-time start, which stays off unless gpu-bootstart.cmd arms it; release
 # autostart.cmd above does not). Built from the published ps5gpu/wddm source: a rebuild on 2026-11-23 differs only
 # in time stamps / checksum / PDB id (.text .data PAGE identical). Catalog made by New-FileCatalog (sorted).
 # Replaces the r7 60 Hz build (0.3.1121.32982), whose exact source was not kept. Refresh rate: the launcher caps it.
-gpu\wddm\ps5wddm.sys           | build/ps5gpu/wddm-boot/ps5wddm.sys                                  | driver
-gpu\wddm\ps5wddm.inf           | build/ps5gpu/wddm-boot/ps5wddm.inf                                  | file
-gpu\wddm\ps5wddm.cat           | build/ps5gpu/wddm-boot/ps5wddm.cat                                  | signed-cat
-gpu\wddm\ps5test.cer           | build/ps5gpu/wddm-boot/ps5test.cer                                    | file
-gpu\d3d10\libgallium_d3d10.dll | build/gpusrc/mesa-build-zink/src/gallium/targets/d3d10umd/libgallium_d3d10.dll | file
-gpu\vk\vulkan_radeon.dll       | build/gpusrc/mesa-build-ps5/src/amd/vulkan/vulkan_radeon.dll         | file
+gpu\wddm\ps5wddm.sys           | build/release-signed/wddm/ps5wddm.sys                               | driver
+gpu\wddm\ps5wddm.inf           | build/release-signed/wddm/ps5wddm.inf                               | file
+gpu\wddm\ps5wddm.cat           | build/release-signed/wddm/ps5wddm.cat                               | signed-cat
+gpu\wddm\ps5test.cer           | build/release-signed/wddm/ps5test.cer                               | file
+# v1.0.1 (native DX12): DWM's D3D10 driver from the GPU session's DX12 release package (adds the WDDM 2.0 picture
+# read; works in 1.3 too). both vulkan_radeon builds are PINNED to r13 (da2aa3c0 / 46e2c29a): the GPU session's D3D12 tests ran on exactly these.
+gpu\d3d10\libgallium_d3d10.dll | build/dx12-release/d3d10/libgallium_d3d10.dll                      | file
+# native Direct3D 12 user-mode driver (UserModeDriverName / UserModeDriverNameWow slot 4 in ps5wddm.inf) on vkd3d-proton
+# 3.1 + patch 0001 (LGPL-2.1: source + patch go with the release attachments). ps5vkd3d.dll = vkd3d-proton's
+# d3d12core.dll, renamed and loaded by full path.
+gpu\d3d12umd\ps5d3d12.dll       | build/dx12-release/d3d12umd/ps5d3d12.dll                          | file
+gpu\d3d12umd\ps5vkd3d.dll       | build/dx12-release/d3d12umd/ps5vkd3d.dll                          | file
+gpu\d3d12umd32\ps5d3d12.dll     | build/dx12-release/d3d12umd32/ps5d3d12.dll                        | file
+gpu\d3d12umd32\ps5vkd3d.dll     | build/dx12-release/d3d12umd32/ps5vkd3d.dll                        | file
+gpu\vk\vulkan_radeon.dll       | installer/payload/pinned/r13/vulkan_radeon.x64.dll                 | file
 # libwinpthread-1.dll: vulkan_radeon.dll (both) and libgallium_wgl.dll import it and a clean Windows has none. Without
 # it the Vulkan driver cannot load, the Direct3D driver gets no screen, dwm.exe aborts and Windows stops the display
 # adapter: the 19044.1288 release blocker of 2026-11-22/23 (the dev install had the file from manual set-up).
 gpu\vk\libwinpthread-1.dll     | build/winpthreads/x64/libwinpthread-1.dll                            | file
 gpu\vk\ps5_icd.json            | ps5gpu/win/vkreg/ps5_icd.json                                        | file
-gpu\vk32\vulkan_radeon.dll     | build/gpusrc/mesa-build-ps5-32/src/amd/vulkan/vulkan_radeon.dll      | file
+gpu\vk32\vulkan_radeon.dll     | installer/payload/pinned/r13/vulkan_radeon.x86.dll                 | file
 gpu\vk32\libwinpthread-1.dll   | build/winpthreads/x86/libwinpthread-1.dll                            | file
 gpu\vk32\ps5_icd.json          | ps5gpu/win/vkreg/ps5_icd.json                                        | file
 gpu\vkreg\vulkan-1.x64.dll     | build/dl-vk/loader-build/loader/vulkan-1.dll                         | file
@@ -62,12 +81,13 @@ gpu\kit\ps5-gamekit.ps1        | ps5gpu/win/kit/ps5-gamekit.ps1                 
 gpu\kit\kit-install.cmd        | ps5gpu/win/kit/kit-install.cmd                                       | script
 gpu\kit\kit-install.ps1        | ps5gpu/win/kit/kit-install.ps1                                       | script
 gpu\kit\kit-menu.ps1           | ps5gpu/win/kit/kit-menu.ps1                                          | script
-eth\p5eth.sys                  | build/cleanroom-p5eth/p5eth.sys                                      | driver
-eth\p5eth.inf                  | build/cleanroom-p5eth/p5eth.inf                                      | file
-eth\p5eth.cat                  | build/cleanroom-p5eth/p5eth.cat                                      | signed-cat
+eth\p5eth.sys                  | build/release-signed/eth/p5eth.sys                                   | driver
+eth\p5eth.inf                  | build/release-signed/eth/p5eth.inf                                   | file
+eth\p5eth.cat                  | build/release-signed/eth/p5eth.cat                                   | signed-cat
 eth\devadd.exe                 | build/ps5wifi/devadd.exe                                             | file
 ps5therm.exe                   | build/ps5therm/ps5therm.exe                                          | file
-ps5guard.cmd                   | winremote/ps5guard.cmd                                               | script
+ps5guard.cmd                   | installer/payload/warm/ps5guard.cmd                                  | script
+ps5warm.exe                    | installer/payload/warm/ps5warm.exe                                   | file
 setup\ps5-setup.cmd            | installer/payload/setup/ps5-setup.cmd                                | script
 setup\wu-tasks-off.ps1         | installer/payload/setup/wu-tasks-off.ps1                             | script
 setup\wu-tasks-system.cmd      | installer/payload/setup/wu-tasks-system.cmd                          | script

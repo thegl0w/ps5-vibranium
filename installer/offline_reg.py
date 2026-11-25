@@ -45,7 +45,10 @@ def system_edits(cs):
         (f"{s}\\partmgr\\Parameters", "SanPolicy", REG_DWORD, 4),
         (f"{c}\\Power", "HibernateEnabled", REG_DWORD, 0),
         (f"{c}\\Session Manager\\Power", "HiberbootEnabled", REG_DWORD, 0),
-        (f"{c}\\CrashControl", "AutoReboot", REG_DWORD, 0),
+        # the kernel looks for the boot partition ONCE unless this is set (ms), then retries every 200 ms: without it
+        # every start races the USB disk's enumeration -> random 0x7B INACCESSIBLE_BOOT_DEVICE C0000034 (2026-11-24)
+        (f"{c}\\PnP", "PollBootPartitionTimeout", REG_DWORD, 60000),
+        (f"{c}\\CrashControl", "AutoReboot", REG_DWORD, 1),   # 1.1: stop error -> restart -> warm restart loop
         (f"{c}\\CrashControl", "CrashDumpEnabled", REG_DWORD, 3),
         (f"{c}\\CrashControl", "DisplayParameters", REG_DWORD, 1),
         # Windows Update off from the very first start: the kernel stub is tied to this ntoskrnl build
@@ -70,6 +73,9 @@ def software_edits():
     e += [(r"Policies\Microsoft\Windows\DeliveryOptimization", "DODownloadMode", REG_DWORD, 0)]
     # no driver downloads from Windows Update for our devices
     e += [(r"Microsoft\Windows\CurrentVersion\DriverSearching", "SearchOrderConfig", REG_DWORD, 0)]
+    # Edge's GPU acceleration flashes the whole window white on our driver (2026-11-24, owner: many bright flashes);
+    # policy off from the first start. Edge then shows "managed by your organization" (README says why).
+    e += [(r"Policies\Microsoft\Edge", "HardwareAccelerationModeEnabled", REG_DWORD, 0)]
     return e
 
 

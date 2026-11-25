@@ -20,6 +20,12 @@ set R=%errorlevel%
 echo %date% %time% automatic start finished, exit %R% >> autostart.log
 rem GPU up: the display driver may now run as a full graphics driver (desktop composed on the GPU). autostart.nofull
 rem keeps it display-only.
+rem v1.0.1: WDDM mode by the user's choice, applied before every switch to full: 2.0 (native Direct3D 12) by default,
+rem 1.3 (as in 1.0) when C:\ps5\gpu\dx12-native.off exists (dx12-native-off.cmd / -on.cmd, no admin needed).
+set V=20
+if exist C:\ps5\gpu\dx12-native.off set V=13
+reg add HKLM\SYSTEM\CurrentControlSet\Services\ps5wddm /v DefaultVersion /t REG_DWORD /d %V% /f >nul 2>&1
+echo %date% %time% WDDM mode for this start: %V% >> autostart.log
 if "%R%"=="0" if not exist autostart.nofull (
   echo on > C:\ps5\gpu\umd-dwm-on
   call C:\ps5\gpu\wddm-mode.cmd full >> autostart.log 2>&1

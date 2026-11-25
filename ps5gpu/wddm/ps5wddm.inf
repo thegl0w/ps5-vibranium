@@ -1,11 +1,12 @@
-; ps5wddm: display-only WDDM driver for the PS5's GPU (stage W1). MIT licence.
+; ps5wddm: WDDM driver for the PS5's GPU, DX12 release package (WDDM 2.0 by default, 1.3 selectable). MIT licence.
+; DriverVer is chosen high (31.x) so games' AMD minimum-driver checks pass; it is not an AMD driver version.
 ; The second hardware ID is QEMU's standard VGA card, for rehearsals in a VM.
 [Version]
 Signature="$Windows NT$"
 Class=Display
 ClassGuid={4d36e968-e325-11ce-bfc1-08002be10318}
 Provider=%Provider%
-DriverVer=11/20/2026,0.3.2.0
+DriverVer=11/23/2026,31.0.1123.1
 CatalogFile=ps5wddm.cat
 PnpLockdown=1
 
@@ -47,8 +48,9 @@ HKR,"Interrupt Management\MessageSignaledInterruptProperties",MSISupported,0x000
 HKR,,VgaCompatible,0x00010001,0
 ; A full graphics driver names its user-mode halves here (Direct3D 9, 10, 11, 12). Test value for now: a file that
 ; does not exist, to see whether Windows wants the entry at all before it starts the adapter.
-HKR,,UserModeDriverName,0x00010000,"C:\ps5\gpu\d3d10\libgallium_d3d10.dll","C:\ps5\gpu\d3d10\libgallium_d3d10.dll","C:\ps5\gpu\d3d10\libgallium_d3d10.dll","C:\ps5\gpu\d3d10\libgallium_d3d10.dll"
-HKR,,UserModeDriverNameWow,0x00010000,"ps5umd_none.dll","ps5umd_none.dll","ps5umd_none.dll","ps5umd_none.dll"
+; slots: Direct3D 9, 10, 11, 12. Slot 4 = the native Direct3D 12 driver (used in WDDM 2.0 mode).
+HKR,,UserModeDriverName,0x00010000,"C:\ps5\gpu\d3d10\libgallium_d3d10.dll","C:\ps5\gpu\d3d10\libgallium_d3d10.dll","C:\ps5\gpu\d3d10\libgallium_d3d10.dll","C:\ps5\gpu\d3d12umd\ps5d3d12.dll"
+HKR,,UserModeDriverNameWow,0x00010000,"ps5umd_none.dll","ps5umd_none.dll","ps5umd_none.dll","C:\ps5\gpu\d3d12umd32\ps5d3d12.dll"
 HKR,,InstalledDisplayDrivers,0x00010000,"libgallium_d3d10","libgallium_d3d10","libgallium_d3d10","libgallium_d3d10"
 
 [Install.Services]
@@ -61,6 +63,13 @@ StartType=3
 ErrorControl=0
 LoadOrderGroup=Video
 ServiceBinary=%12%\ps5wddm.sys
+AddReg=ServiceSettings
+
+; WDDM 2.0 (GPU MMU, native Direct3D 12) as the persistent default. Recovery: DefaultVersion=13 (reg add
+; HKLM\SYSTEM\CurrentControlSet\Services\ps5wddm /v DefaultVersion /t REG_DWORD /d 13 /f, then restart). A 2.0 start
+; that never became trusted falls back to 1.3 on its own at the next start (counted in Wddm2Fallbacks).
+[ServiceSettings]
+HKR,,DefaultVersion,0x00010001,20
 
 [Strings]
 Provider="PS5 GPU project"

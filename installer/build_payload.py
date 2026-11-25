@@ -13,7 +13,7 @@ Checks (any failure = exit 1, nothing half-written is left marked as good):
   - kernel drivers: AMD64, native subsystem, no HIGH_ENTROPY_VA / TERMINAL_SERVER_AWARE (Windows 10 refuses those:
     0xC0000018), an Authenticode signature present
   - each INF's CatalogFile is staged next to it; ps5wddm.inf's user-mode driver path is staged
-  - DLL machine type matches its folder (vk32/d3d32/x86 loader = i386, the rest AMD64)
+  - DLL machine type matches its folder (vk32/d3d32/d3d12umd32/x86 loader = i386, the rest AMD64)
   - Vulkan manifests point at a DLL that is staged next to them
   - every DLL a staged program or library imports is staged in the same folder, or is a Windows DLL known to be on a
     clean 19044.1288 install (a missing libwinpthread-1.dll kept the Vulkan driver from loading on every fresh
@@ -39,7 +39,7 @@ MANIFEST = HERE / "payload" / "manifest.txt"
 FORBIDDEN = re.compile(r"(unsigned|-vm\b|-vm\.|tri\.exe|test|dxsurf|gdianim|stall|suspend)", re.I)
 I386, AMD64 = 0x14C, 0x8664
 # C:\ps5 paths the scripts name that are made at run time (logs, markers, the microcode copied at install)
-RUNTIME = re.compile(r"^(.*\.(log|txt|tmp|bmp|count|done)|gpu\\fw|gpu\\fw\\.*|gpu\\umd-.*|gpu\\autostart\.(off|trying|nofull)"
+RUNTIME = re.compile(r"^(.*\.(log|txt|tmp|bmp|count|done)|gpu\\fw|gpu\\fw\\.*|gpu\\umd-.*|gpu\\autostart\.(off|trying|nofull)|gpu\\dx12-native\.(on|off)|gpu\\warm-restart\.(on|off)"
                      r"|gpu\\recover\.count|gpu\\ping\.tmp|gpu\\vk\\demo\.cmd|gpu\\dgvoodoo.*|gpu\\kit\\.*\.txt"
                      r"|gpu\\ps5wddm-trace.*|setup\\done\.txt|dumps.*|wu-off\.ps1|gpu\\start\.log\.?)$", re.I)
 
@@ -274,7 +274,7 @@ def check_driver(dest, data):
 def want_machine(dest):
     d = dest.lower()
     if d.endswith(".dll") or d.endswith(".exe"):
-        return I386 if (d.startswith(("gpu\\vk32\\", "gpu\\d3d32\\")) or d.endswith("x86.dll")) else AMD64
+        return I386 if (d.startswith(("gpu\\vk32\\", "gpu\\d3d32\\", "gpu\\d3d12umd32\\")) or d.endswith("x86.dll")) else AMD64
     return None
 
 

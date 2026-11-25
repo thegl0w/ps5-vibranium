@@ -22,6 +22,7 @@
 #define PS5_WARM_BLOCK_PAGES   16
 #define PS5_WARM_CAP_DEFAULT   20                         // loops before Restart falls back to the ICC restart
 #define PS5_WARM_TEST_3A       0x1                        // record flag: firmware-only loop test (launch option ps5warm=3a)
+#define PS5_WARM_DIAG_SIZE     0x110                      // = WPD_SIZE (warm_pci.h; checked in Ps5Warm.c)
 
 // Where stage 1, its boot_params and the bundle live (kexec's segments; reserved, never given to UEFI or Windows).
 #define PS5_WARM_STAGE_LO      0x7A000000ULL
@@ -40,7 +41,16 @@
 #define REC_FLAGS     0x2C     // UINT32 PS5_WARM_TEST_*
 #define REC_GOPFB     0x30     // UINT64 address the GOP was given (BAR0 alias or the carve-out address)
 #define REC_CARVE     0x38     // UINT64 carve-out base
-#define REC_ARMED     0x40     // UINT32 1 = Restart loops
+#define REC_ARMED     0x40     // UINT32 0 = off; 1 = Restart loops, set by Windows in this start; n >= 2 = Restart loops,
+                               //   inherited from the start before: n - 1 starts in a row that Windows did not confirm
+// A start counts as confirmed when Windows sets the Ps5WarmRestart variable to 1 (ps5guard does at every start). A
+// Windows that dies before that (0x7B with automatic restart after a stop error) leaves the inherited value, which
+// grows by one per start. Above PS5_WARM_UNCONFIRMED_MAX the hook declines and the console restarts normally, so a
+// Windows that cannot start ends there after a few tries instead of looping up to the cap (2026-11-24).
+#define PS5_WARM_UNCONFIRMED_MAX  4   // armed values 1..5 loop; 6 = the fifth failed start in a row: normal restart
+#define PS5_WARM_ARMED_HANDED     0x100   // added to the armed value when the restart was handed to the boot CPU from
+                                          // another CPU (warm_hand.h); taken off again by the next run, logged by BDS
+#define PS5_WARM_HAND_TICKS       1597000000ULL   // one second of the console's TSC: how long the boot CPU gets
 #define REC_LOOPS     0x44     // UINT32 warm loops since the launch from Linux
 #define REC_CAP       0x48     // UINT32
 #define REC_RUNS      0x4C     // UINT32 stage 1 runs since the launch
@@ -61,10 +71,13 @@
 #define BLK_ARMED     0x080    // UINT32
 #define BLK_LOOPS     0x084    // UINT32
 #define BLK_CAP       0x088    // UINT32
+#define BLK_HAND      0x08C    // UINT32 hand-over word (warm_hand.h: 1 offered, 2 taken, 3 withdrawn)
+#define BLK_BSP       0x090    // UINT32 APIC id of the boot CPU (set at boot)
 #define BLK_GDT       0x100
 #define BLK_GDTR      0x180
 #define BLK_IDTR      0x190    // diagnostics: exceptions 0-31 -> a red square, the vector in binary, then a halt loop
 #define BLK_IDT       0x200    // 32 interrupt gates
+#define BLK_DIAG      0xC00    // copy of the record's PCI restore report (warm_pci.h WPD_*, 0x110 bytes) for Windows
 #define BLK_BLOB      0x1000
 #define BLK_PML4      0x2000
 #define BLK_PDPT      0x3000   // 0-512 GiB: 0-4 GiB through four page directories, the rest in 1 GiB pages
@@ -81,6 +94,7 @@ VOID     Ps5WarmConvert (VOID);                  // SetVirtualAddressMap
 VOID     Ps5WarmTry (IN BOOLEAN AfterExitBootServices);   // ResetWarm/ResetCold: returns only if declined
 EFI_STATUS Ps5WarmSetArmed (IN UINT8 Armed);     // runtime, from the Ps5WarmRestart variable
 BOOLEAN  Ps5WarmStatus (OUT UINT32 *Status4);    // {valid, armed, loops, cap}
+UINTN    Ps5WarmDiag (OUT UINT8 *Buffer);        // stage 1's PCI restore report of this run; returns its size (PS5_WARM_DIAG_SIZE)
 VOID     Ps5WarmMarkDeclined (VOID);             // Ps5Power reached: red square 15 (only while identity-mapped)
 #endif
 

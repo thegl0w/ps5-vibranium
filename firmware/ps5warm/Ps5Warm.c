@@ -4,8 +4,10 @@
 // Adapted from warmrestart/exp2/warmrt.c (proven under OVMF and under Windows in KVM, 2026-11-23).
 //
 // Restart re-enters stage 1 only when every check passes: a valid record from stage 1, 1 GiB pages available, the
-// block allocated, armed (variable Ps5WarmRestart = 1, off after every launch from Linux), loop counter below the cap,
-// running on the boot CPU, and Windows' address of the switch code mappable. Otherwise ResetWarm/ResetCold go on to
+// block allocated, armed (variable Ps5WarmRestart = 1, off after every launch from Linux; inherited over a warm run for
+// at most PS5_WARM_UNCONFIRMED_MAX starts that Windows did not confirm), loop counter below the cap,
+// Windows' address of the switch code mappable, and running on the boot CPU; on another CPU the restart is handed
+// over to the boot CPU (warm_hand.h), and only if that fails the ICC restart follows. Otherwise ResetWarm/ResetCold go on to
 // the ICC restart exactly as before.
 //
 // Copyright (c) 2026 ps5win contributors
@@ -18,8 +20,24 @@
 
 #include "Ps5Warm.h"
 #include "Ps5WarmConfig.h"          // PS5_WARM_ENABLED, written by firmware/prepare.py (PS5WARM=1)
+#define WP_NO_CODE                  // layout of stage 1's PCI restore report only
+#include "warm_pci.h"
+
+STATIC_ASSERT (WPD_SIZE == PS5_WARM_DIAG_SIZE, "report size");
+STATIC_ASSERT (BLK_DIAG + WPD_SIZE <= BLK_BLOB, "report fits in front of the blob");
 
 extern VOID EFIAPI Ps5WarmSwitch (UINT64 Cr3, UINT64 Blob);
+extern UINT32 EFIAPI Ps5WarmKick (UINT64 Cr3, UINT64 HandPhys, UINT32 BootCpu, UINT64 Ticks);
+extern VOID EFIAPI Ps5WarmNmiEntry (VOID);
+extern volatile UINT64 gPs5WarmHand[3];
+
+// Hand-over to the boot CPU when the reset arrives on another one (warm_hand.h, shared with the emulator test).
+typedef UINT8 u8; typedef UINT32 u32; typedef UINT64 u64;
+#define WH_SIDT(p)   AsmReadIdtr ((IA32_DESCRIPTOR *)(VOID *)(p))
+#define WH_RDCR0()   ((u64)AsmReadCr0 ())
+#define WH_WRCR0(v)  AsmWriteCr0 ((UINTN)(v))
+#define WH_KICK(pml4, hand, bsp, ticks)  Ps5WarmKick ((pml4), (hand), (bsp), (ticks))
+#include "warm_hand.h"
 extern UINT8  Ps5WarmBlob[], Ps5WarmBlobEnd[], Ps5WarmVecs[];
 
 STATIC UINT8            *mPs5WarmBlk   = NULL;   // as this code reaches it (converted at SetVirtualAddressMap)
@@ -172,6 +190,11 @@ Ps5WarmInit (
   }
 
   CopyMem (Blk + BLK_BLOB, Ps5WarmBlob, BlobSize);
+  //
+  // What stage 1 found and did to the PCI state on a warm run (zero after a launch from Linux): kept in the block,
+  // because the record is not mapped while Windows runs. Read through the Ps5WarmRestart variable.
+  //
+  CopyMem (Blk + BLK_DIAG, (VOID *)(UINTN)(PS5_WARM_RECORD + WPD_OFF), WPD_SIZE);
 
   *(UINT32 *)(Blk + BLK_MODE)   = 1;
   *(UINT64 *)(Blk + BLK_ENTRY)  = R64 (Rec, REC_ENTRY);
@@ -181,7 +204,16 @@ Ps5WarmInit (
   *(UINT32 *)(Blk + BLK_WIDTH)  = R32 (Rec, REC_WIDTH);
   *(UINT32 *)(Blk + BLK_HEIGHT) = R32 (Rec, REC_HEIGHT);
   *(UINT64 *)(Blk + BLK_RECORD) = PS5_WARM_RECORD;
-  *(UINT32 *)(Blk + BLK_ARMED)  = (R32 (Rec, REC_ARMED) == 1) ? 1 : 0;
+  //
+  // Armed carries over a warm run (a launch from Linux wrote 0), one higher: this start is not confirmed until
+  // Windows sets the variable to 1 (Ps5WarmSetArmed). See REC_ARMED in Ps5Warm.h.
+  //
+  {
+    UINT32  A = R32 (Rec, REC_ARMED) & ~(UINT32)PS5_WARM_ARMED_HANDED;   // the mark of a hand-over is for the log only
+    *(UINT32 *)(Blk + BLK_ARMED) = ((A >= 1) && (A <= PS5_WARM_UNCONFIRMED_MAX + 1)) ? A + 1 : 0;
+  }
+  AsmCpuid (1, &Eax, &Ebx, &Ecx, &Edx);
+  *(UINT32 *)(Blk + BLK_BSP) = Ebx >> 24;           // this is the boot CPU: the only one the stub may run on
   *(UINT32 *)(Blk + BLK_LOOPS)  = R32 (Rec, REC_LOOPS);
   *(UINT32 *)(Blk + BLK_CAP)    = R32 (Rec, REC_CAP);
   *(UINT32 *)(Blk + BLK_MAGIC)  = PS5_WARM_BLOCK_MAGIC;
@@ -234,6 +266,20 @@ Ps5WarmStatus (
   return Ok;
 }
 
+UINTN
+Ps5WarmDiag (
+  OUT UINT8  *Buffer
+  )
+{
+  if (mPs5WarmReady && (R32 (mPs5WarmBlk, BLK_MAGIC) == PS5_WARM_BLOCK_MAGIC)) {
+    CopyMem (Buffer, mPs5WarmBlk + BLK_DIAG, PS5_WARM_DIAG_SIZE);
+  } else {
+    ZeroMem (Buffer, PS5_WARM_DIAG_SIZE);
+  }
+
+  return PS5_WARM_DIAG_SIZE;
+}
+
 /**
   ResetWarm / ResetCold. Returns only when the warm path is not taken (the caller then sends the ICC restart).
 **/
@@ -252,14 +298,11 @@ Ps5WarmTry (
 
   Ps5WarmBox (11, 0xFFFF8000);                      // orange: hook entered (diagnostic, identity-mapped runs only)
 
-  if ((R32 (Blk, BLK_MAGIC) != PS5_WARM_BLOCK_MAGIC) || (R32 (Blk, BLK_ARMED) != 1) ||
+  if ((R32 (Blk, BLK_MAGIC) != PS5_WARM_BLOCK_MAGIC) || (R32 (Blk, BLK_ARMED) < 1) ||
+      (R32 (Blk, BLK_ARMED) > PS5_WARM_UNCONFIRMED_MAX + 1) ||    // too many starts in a row that Windows never confirmed
       (R32 (Blk, BLK_LOOPS) >= R32 (Blk, BLK_CAP)))
   {
     return;
-  }
-
-  if ((AsmReadMsr64 (0x1B) & BIT8) == 0) {
-    return;                                         // not the boot CPU: an INIT would restart it at the reset vector
   }
 
   Va = (UINT64)(UINTN)&Ps5WarmSwitch;
@@ -282,6 +325,23 @@ Ps5WarmTry (
     SwPdpt[(Va >> 30) & 511] = (mPs5WarmBlkPhys + BLK_SW_PD) | 3;
     SwPd[(Va >> 21) & 511]   = (mPs5WarmBlkPhys + BLK_SW_PT) | 3;
     SwPt[(Va >> 12) & 511]   = (Pa & ~0xFFFULL) | 1;
+  }
+
+  if ((AsmReadMsr64 (0x1B) & BIT8) == 0) {
+    //
+    // Not the boot CPU (Windows restarts after a stop error on the CPU that hit it). The stub parks every other CPU
+    // with INIT, which would send the boot CPU to the reset vector, so it must run ON the boot CPU: offer it the
+    // restart through an NMI. Returns here only if the boot CPU did not take over; then the ICC restart follows.
+    //
+    if ((((UINT64)(UINTN)&Ps5WarmKick ^ Va) >> 12) != 0 || (((UINT64)(UINTN)&Ps5WarmNmiEntry ^ Va) >> 12) != 0) {
+      return;                                       // must share the one page mapped above
+    }
+
+    R32 (Blk, BLK_ARMED) |= PS5_WARM_ARMED_HANDED;
+    wh_handover (mPs5WarmBlkPhys + BLK_PML4, mPs5WarmBlkPhys + BLK_BLOB, mPs5WarmBlkPhys + BLK_HAND,
+      (volatile u32 *)(Blk + BLK_HAND), gPs5WarmHand, (UINT64)(UINTN)&Ps5WarmNmiEntry, R32 (Blk, BLK_BSP),
+      PS5_WARM_HAND_TICKS);
+    return;
   }
 
   Ps5WarmBox (12, 0xFFFF80C0);                      // pink: every check passed, switching now

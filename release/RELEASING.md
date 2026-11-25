@@ -13,7 +13,9 @@ The steps for one release, in order. Nothing is published before step 5.
 | `linux-7.2.3.tar.xz` | Linux source for the shipped kernel (GPL-2.0), from kernel.org |
 | `linux.patch` | ps5-linux-patches @ 5f6b5d32 (the PS5 patch the kernel was built with) |
 | `kernel-7.2.3-p5f6b.config` | the kernel configuration (see `release/KERNEL-SOURCE.md`) |
-| `vkd3d-proton-3.1-src.tar.xz` | vkd3d-proton v3.1 source incl. all submodules (LGPL-2.1; the DLLs ship unmodified; tag commit 4522cc1a) |
+| `vkd3d-proton-3.1-src.tar.xz` | vkd3d-proton v3.1 source incl. all submodules (LGPL-2.1; tag commit 4522cc1a). The game kit's DLLs are unmodified; the native D3D12 driver's `ps5vkd3d.dll` is built from it with the patch below |
+| `0001-dxil-spirv-dxbc-udiv-scalar-helper.patch` | our change to vkd3d-proton 3.1 (dxil-spirv) for `ps5vkd3d.dll` (from `build/dx12-release/source/`) |
+| `mesa-ps5-dx12.patch` | full Mesa diff vs fec8830e the shipped D3D10 driver is built from (MIT; also in the repo as `ps5gpu/mesa/mesa-ps5-dx12.patch`) |
 
 Before signing: the README's Download table carries the same two SHA-256 values as `SHA256SUMS`.
 

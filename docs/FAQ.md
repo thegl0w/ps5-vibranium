@@ -15,8 +15,10 @@ for what works and what doesn't yet.
 shows a boot to the desktop with the GPU driver. Parts of the code and docs were written with AI help, as the README
 says. Everything shipped was tested on a real console.
 
-**Which Windows?** Only the ISO named in the README (Windows 10 IoT Enterprise LTSC 2021, build 19044.1288, with the
-SHA-256 given there). The installer checks the edition and kernel build and refuses anything else before writing.
+**Which Windows?** The ISO named in the README (Windows 10 IoT Enterprise LTSC 2021, build 19044.1288, with the
+SHA-256 given there) is the tested one. Windows 10 22H2 and other 2004–22H2 media work as an experimental option
+(`experimental=yes` in `ps5win-answers.txt`; tested once with Microsoft's 22H2 ISO). The installer checks the edition
+and kernel before writing and refuses anything it can't patch. You bring the ISO and your own licence.
 
 **Does it touch the PS5's internal SSD or my PS5 games?** No. The internal NVMe is hidden from Windows and blocked three
 ways (see Safety in the README). ps5win never reads or runs PS5 games.
@@ -30,12 +32,16 @@ definitions by itself when the console is online.
 **Why is the screen black for a second after the desktop appears on the second start?** That is the switch to the full
 GPU driver; a green rectangle near the top left just before it is the GPU's self-test.
 
+**Do I have to start the loader again after every Restart?** No (since 1.1). Start → Restart comes straight back into
+Windows without leaving our firmware, and a blue screen restarts by itself the same way. After Shut down you start the
+loader again as usual.
+
 **Can I play online games with anti-cheat?** No. Kernel anti-cheat does not work here and can get accounts banned; the
 game kit skips those games.
 
-**Why does PS5 OS say the console wasn't turned off properly, or check its storage first?** Expected and harmless:
-Windows turns the console off or restarts it through its power controller directly, without PS5 OS's own shutdown, so
-PS5 OS checks itself at the next start. ps5win never writes to the console's internal storage.
+**Why does the console say it wasn't turned off properly, or check its storage when it next starts normally?**
+Expected and harmless: Windows turns the console off through its power controller directly, without the console's own
+shutdown, so the console checks itself at the next normal start. ps5win never writes to the console's internal storage.
 
 **120 Hz? Wi-Fi? Bluetooth? Blu-ray drive?** Not in this release. 120 Hz works in development; Wi-Fi needs a clean
 driver build; Bluetooth and the Blu-ray drive are not done yet.
