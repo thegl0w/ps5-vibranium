@@ -1,4 +1,4 @@
-; ps5wddm: WDDM driver for the PS5's GPU, DX12 release package (WDDM 2.0 by default, 1.3 selectable). MIT licence.
+; ps5wddm: WDDM driver for the PS5's GPU, release package (WDDM 2.0 by default, 1.3 selectable; OpenGL ICD since 1.3). MIT licence.
 ; DriverVer is chosen high (31.x) so games' AMD minimum-driver checks pass; it is not an AMD driver version.
 ; The second hardware ID is QEMU's standard VGA card, for rehearsals in a VM.
 [Version]
@@ -6,7 +6,7 @@ Signature="$Windows NT$"
 Class=Display
 ClassGuid={4d36e968-e325-11ce-bfc1-08002be10318}
 Provider=%Provider%
-DriverVer=11/23/2026,31.0.1123.1
+DriverVer=11/25/2026,31.0.1125.20
 CatalogFile=ps5wddm.cat
 PnpLockdown=1
 
@@ -51,6 +51,15 @@ HKR,,VgaCompatible,0x00010001,0
 ; slots: Direct3D 9, 10, 11, 12. Slot 4 = the native Direct3D 12 driver (used in WDDM 2.0 mode).
 HKR,,UserModeDriverName,0x00010000,"C:\ps5\gpu\d3d10\libgallium_d3d10.dll","C:\ps5\gpu\d3d10\libgallium_d3d10.dll","C:\ps5\gpu\d3d10\libgallium_d3d10.dll","C:\ps5\gpu\d3d12umd\ps5d3d12.dll"
 HKR,,UserModeDriverNameWow,0x00010000,"ps5umd_none.dll","ps5umd_none.dll","ps5umd_none.dll","C:\ps5\gpu\d3d12umd32\ps5d3d12.dll"
+; OpenGL (since 1.3): Mesa's OpenGL-on-Vulkan (Zink) as the system OpenGL driver (ICD), 64- and 32-bit. Windows' own
+; opengl32.dll hands every OpenGL program to it, also games that only load DLLs from System32 (some older engines).
+; The *Wow values are read for 32-bit programs; without OpenGLVersionWow they fell back to Microsoft's GDI Generic 1.1.
+HKR,,OpenGLDriverName,0x00010000,"C:\ps5\gpu\gl\libgallium_wgl.dll"
+HKR,,OpenGLDriverNameWow,0x00010000,"C:\ps5\gpu\gl32\libgallium_wgl.dll"
+HKR,,OpenGLVersion,0x00010001,1
+HKR,,OpenGLFlags,0x00010001,1
+HKR,,OpenGLVersionWow,0x00010001,1
+HKR,,OpenGLFlagsWow,0x00010001,1
 HKR,,InstalledDisplayDrivers,0x00010000,"libgallium_d3d10","libgallium_d3d10","libgallium_d3d10","libgallium_d3d10"
 
 [Install.Services]

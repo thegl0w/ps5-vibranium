@@ -88,6 +88,14 @@ struct Device {
     struct Alloc* volatile source;       // what Windows wants on the screen
     PHYSICAL_ADDRESS sourceAddress;
     volatile LONG sourceChanged, visible, vsyncOn, notifyPending;
+    // Lower display modes (2026-11-25): a source picture that is not the screen's own size is never flipped to; the
+    // engine thread scales it into the frame buffer (ShowSource). Size and pitch of the current source allocation:
+    volatile ULONG srcW, srcH, srcPitch, srcBpp;
+    volatile LONG scaleOn;               // the current source needs scaling (the display shows the frame buffer)
+    volatile ULONG scaling;              // the path's scaling as Windows committed it (D3DKMDT_VPPS_*), 0 = not known
+    ULONG modeW, modeH;                  // the committed source mode
+    ULONG scaleFrames, scaleUsMax, scaleUsSum, scaleSkips;
+    ULONG scaleTotal, scaleSkipTotal, scaleUsLast;   // cumulative, for the registry (ScaleCopies, ScaleSkips, ScaleUs)
     PETHREAD engine;
     KEVENT engineWake;
     KSPIN_LOCK queueLock;
@@ -706,31 +714,68 @@ static void FillSignal(Device* d, D3DKMDT_VIDEO_SIGNAL_INFO* s)
     s->ScanLineOrdering = D3DDDI_VSSLO_PROGRESSIVE;
 }
 
-static NTSTATUS AddSourceMode(Device* d, D3DKMDT_HVIDPN vidpn, const DXGK_VIDPN_INTERFACE* vi, D3DDDI_VIDEO_PRESENT_SOURCE_ID source)
+// Lower desktop/game modes (2026-11-25). The screen itself always runs the one mode Linux set before the hand-over;
+// like AMD's and NVIDIA's "GPU scaling", a smaller source mode is scaled onto it (ShowSource: keeps the aspect ratio
+// and letterboxes by default). Only in full mode: the display-only path copies dirty rectangles 1:1. Registry value
+// LowerModes=0 offers the screen's own mode only, as before.
+struct ModeSize { USHORT w, h; };
+static const ModeSize kLowerModes[] = {
+    {640, 480}, {800, 600}, {1024, 768}, {1152, 864}, {1280, 720}, {1280, 768}, {1280, 800}, {1280, 960}, {1280, 1024},
+    {1360, 768}, {1366, 768}, {1440, 900}, {1600, 900}, {1600, 1200}, {1680, 1050}, {1920, 1080}, {1920, 1200},
+    {2560, 1080}, {2560, 1440}, {2560, 1600}, {3200, 1800}, {3840, 2160},
+};
+static BOOLEAN LowerModesOn(Device* d) { return d->full && RegGet(L"LowerModes", 1) != 0; }
+
+static NTSTATUS AddSourceMode(Device* d, D3DKMDT_HVIDPN vidpn, const DXGK_VIDPN_INTERFACE* vi, D3DDDI_VIDEO_PRESENT_SOURCE_ID source, BOOLEAN nativeOnly)
 {
     D3DKMDT_HVIDPNSOURCEMODESET set = NULL;
     const DXGK_VIDPNSOURCEMODESET_INTERFACE* si = NULL;
     NTSTATUS st = vi->pfnCreateNewSourceModeSet(vidpn, source, &set, &si);
     if (!NT_SUCCESS(st)) return st;
-    // The screen's one mode, as BGRA (what the desktop uses) and as RGBA. DXGI lists and matches display modes only in
-    // formats the source mode set names, and games (and dgVoodoo, through Windows' own DXGI) ask for RGBA: without the
-    // second entry FindClosestMatchingMode(R8G8B8A8) fails and they give up (SCP: Containment Breach, 2026-11-21).
+    // Each mode as BGRA (what the desktop uses) and as RGBA. DXGI lists and matches display modes only in formats the
+    // source mode set names, and games (and dgVoodoo, through Windows' own DXGI) ask for RGBA: without the second
+    // entry FindClosestMatchingMode(R8G8B8A8) fails and they give up (SCP: Containment Breach, 2026-11-21).
     // Registry value RgbaMode=0 leaves it out. The display keeps reading BGRA (see DdiCommitVidPn's log line).
-    static const D3DDDIFORMAT kFormats[2] = { D3DDDIFMT_A8R8G8B8, D3DDDIFMT_A8B8G8R8 };
-    const ULONG nformats = RegGet(L"RgbaMode", 1) ? 2 : 1;
-    for (ULONG k = 0; k < nformats && NT_SUCCESS(st); ++k) {
-        D3DKMDT_VIDPN_SOURCE_MODE* mode = NULL;
-        st = si->pfnCreateNewModeInfo(set, &mode);
-        if (!NT_SUCCESS(st)) break;
-        mode->Type = D3DKMDT_RMT_GRAPHICS;
-        mode->Format.Graphics.PrimSurfSize.cx = mode->Format.Graphics.VisibleRegionSize.cx = d->width;
-        mode->Format.Graphics.PrimSurfSize.cy = mode->Format.Graphics.VisibleRegionSize.cy = d->height;
-        mode->Format.Graphics.Stride = d->pitch;
-        mode->Format.Graphics.PixelFormat = kFormats[k];
-        mode->Format.Graphics.ColorBasis = D3DKMDT_CB_SCRGB;
-        mode->Format.Graphics.PixelValueAccessMode = D3DKMDT_PVAM_DIRECT;
-        st = si->pfnAddMode(set, mode);
-        if (!NT_SUCCESS(st)) si->pfnReleaseModeInfo(set, mode);
+    // R5G6B5 (registry value Mode16=1, default off): tried 2026-11-25 for old games that want 640x480x16 (a 2001 D3D8 game;
+    // DXVK d3d8/d3d9 list R5G6B5 modes only when GDI has 16 bpp modes). It does not work: dxgkrnl (19041/19044,
+    // OBTAIN_MODES_ON_SOURCE) moves every non-32-bit source mode of an adapter with a render core into a separate
+    // low-colour list that D3DKMTGetDisplayModeList and GDI (cdd!DrvGetModes) never see; only display-only adapters get
+    // Windows' emulated 8/16 bpp modes. Kept switchable: such a picture is converted to 32 bits in ShowScaled.
+    static const D3DDDIFORMAT kFormats[3] = { D3DDDIFMT_A8R8G8B8, D3DDDIFMT_A8B8G8R8, D3DDDIFMT_R5G6B5 };
+    const BOOLEAN rgba = RegGet(L"RgbaMode", 1) != 0, mode16 = LowerModesOn(d) && RegGet(L"Mode16", 0) != 0;
+    const ULONG nlower = !nativeOnly && LowerModesOn(d) ? (ULONG)(sizeof kLowerModes / sizeof kLowerModes[0]) : 0;
+    for (ULONG m = 0; m <= nlower && NT_SUCCESS(st); ++m) {
+        // m < nlower: a standard mode that fits the screen (not the screen's own size); m == nlower: the screen's own.
+        ULONG w = d->width, h = d->height, stride = d->pitch;
+        if (m < nlower) {
+            w = kLowerModes[m].w;
+            h = kLowerModes[m].h;
+            if (w > d->width || h > d->height || (w == d->width && h == d->height)) continue;
+            stride = w * 4;
+        }
+        for (ULONG k = 0; k < 3 && NT_SUCCESS(st); ++k) {
+            if ((k == 1 && !rgba) || (k == 2 && !mode16)) continue;
+            D3DKMDT_VIDPN_SOURCE_MODE* mode = NULL;
+            st = si->pfnCreateNewModeInfo(set, &mode);
+            if (!NT_SUCCESS(st)) break;
+            mode->Type = D3DKMDT_RMT_GRAPHICS;
+            mode->Format.Graphics.PrimSurfSize.cx = mode->Format.Graphics.VisibleRegionSize.cx = w;
+            mode->Format.Graphics.PrimSurfSize.cy = mode->Format.Graphics.VisibleRegionSize.cy = h;
+            mode->Format.Graphics.Stride = k == 2 ? w * 2 : stride;
+            mode->Format.Graphics.PixelFormat = kFormats[k];
+            mode->Format.Graphics.ColorBasis = D3DKMDT_CB_SCRGB;
+            mode->Format.Graphics.PixelValueAccessMode = D3DKMDT_PVAM_DIRECT;
+            st = si->pfnAddMode(set, mode);
+            if (!NT_SUCCESS(st)) {
+                si->pfnReleaseModeInfo(set, mode);
+                if (k == 2) {                                // Windows refusing a 16-bit mode costs only that mode
+                    static volatile LONG said;
+                    if (InterlockedIncrement(&said) <= 3) LogF("16-bit source mode %ux%u refused: %08X", w, h, st);
+                    st = STATUS_SUCCESS;
+                }
+                if (st == STATUS_GRAPHICS_MODE_ALREADY_IN_MODESET) st = STATUS_SUCCESS;
+            }
+        }
     }
     if (NT_SUCCESS(st)) st = vi->pfnAssignSourceModeSet(vidpn, source, set);
     if (!NT_SUCCESS(st)) vi->pfnReleaseSourceModeSet(vidpn, set);
@@ -756,6 +801,26 @@ static NTSTATUS AddTargetMode(Device* d, D3DKMDT_HVIDPN vidpn, const DXGK_VIDPN_
     return st;
 }
 
+// The size of the source mode pinned in a VidPN, if one is pinned.
+static BOOLEAN PinnedSourceSize(const DXGK_VIDPN_INTERFACE* vi, D3DKMDT_HVIDPN vidpn, D3DDDI_VIDEO_PRESENT_SOURCE_ID source, ULONG* w, ULONG* h)
+{
+    D3DKMDT_HVIDPNSOURCEMODESET set = NULL;
+    const DXGK_VIDPNSOURCEMODESET_INTERFACE* si = NULL;
+    BOOLEAN have = FALSE;
+    if (!NT_SUCCESS(vi->pfnAcquireSourceModeSet(vidpn, source, &set, &si))) return FALSE;
+    const D3DKMDT_VIDPN_SOURCE_MODE* pinned = NULL;
+    if (NT_SUCCESS(si->pfnAcquirePinnedModeInfo(set, &pinned)) && pinned) {
+        if (pinned->Type == D3DKMDT_RMT_GRAPHICS) {
+            *w = pinned->Format.Graphics.PrimSurfSize.cx;
+            *h = pinned->Format.Graphics.PrimSurfSize.cy;
+            have = TRUE;
+        }
+        si->pfnReleaseModeInfo(set, pinned);
+    }
+    vi->pfnReleaseSourceModeSet(vidpn, set);
+    return have;
+}
+
 static NTSTATUS APIENTRY DdiIsSupportedVidPn(IN_CONST_HANDLE context, INOUT_PDXGKARG_ISSUPPORTEDVIDPN arg)
 {
     Tr tr("DdiIsSupportedVidPn");
@@ -776,6 +841,15 @@ static NTSTATUS APIENTRY DdiIsSupportedVidPn(IN_CONST_HANDLE context, INOUT_PDXG
     st = ti->pfnGetNumPaths(topology, &paths);
     if (!NT_SUCCESS(st)) return st;
     arg->IsVidPnSupported = paths <= 1;         // one source, one monitor
+    // A source mode other than the screen's own: only the smaller ones we offer (scaled whatever the path's scaling
+    // says; a pinned "identity" is shown aspect-scaled rather than refused, so a mode change never fails over it).
+    const D3DKMDT_VIDPN_PRESENT_PATH* path = NULL;
+    if (paths == 1 && NT_SUCCESS(ti->pfnAcquireFirstPathInfo(topology, &path)) && path) {
+        ULONG w = 0, h = 0;
+        if (PinnedSourceSize(vi, arg->hDesiredVidPn, path->VidPnSourceId, &w, &h) && (w != d->width || h != d->height))
+            if (!LowerModesOn(d) || w > d->width || h > d->height || w < 320 || h < 200) arg->IsVidPnSupported = FALSE;
+        ti->pfnReleasePathInfo(topology, path);
+    }
     return STATUS_SUCCESS;
 }
 
@@ -800,7 +874,13 @@ static NTSTATUS APIENTRY DdiEnumVidPnCofuncModality(IN_CONST_HANDLE context, IN_
     const D3DKMDT_VIDPN_PRESENT_PATH* path = NULL;
     st = ti->pfnAcquireFirstPathInfo(topology, &path);
     while (st == STATUS_SUCCESS && path) {
-        // Source: offer our mode unless one is pinned already or this source is the pivot of the enumeration.
+        // A pinned smaller source mode needs a scaling path. The other way round is not enforced: with "identity"
+        // pinned (the desktop's current path) the smaller modes are still offered, or mode lists taken from the current
+        // configuration would show the screen's own mode only; such a mode is scaled anyway (ShowScaled).
+        ULONG pw = 0, ph = 0;
+        const BOOLEAN srcPinned = PinnedSourceSize(vi, arg->hConstrainingVidPn, path->VidPnSourceId, &pw, &ph);
+        const BOOLEAN srcScaled = srcPinned && (pw != d->width || ph != d->height);
+        // Source: offer our modes unless one is pinned already or this source is the pivot of the enumeration.
         {
             D3DKMDT_HVIDPNSOURCEMODESET set = NULL;
             const DXGK_VIDPNSOURCEMODESET_INTERFACE* si = NULL;
@@ -811,7 +891,7 @@ static NTSTATUS APIENTRY DdiEnumVidPnCofuncModality(IN_CONST_HANDLE context, IN_
                 if (pinned) si->pfnReleaseModeInfo(set, pinned);
                 vi->pfnReleaseSourceModeSet(arg->hConstrainingVidPn, set);
                 BOOLEAN pivot = arg->EnumPivotType == D3DKMDT_EPT_VIDPNSOURCE && arg->EnumPivot.VidPnSourceId == path->VidPnSourceId;
-                if (NT_SUCCESS(s2) && !pinned && !pivot) s2 = AddSourceMode(d, arg->hConstrainingVidPn, vi, path->VidPnSourceId);
+                if (NT_SUCCESS(s2) && !pinned && !pivot) s2 = AddSourceMode(d, arg->hConstrainingVidPn, vi, path->VidPnSourceId, FALSE);
             }
             if (!NT_SUCCESS(s2)) { ti->pfnReleasePathInfo(topology, path); return s2; }
         }
@@ -830,13 +910,20 @@ static NTSTATUS APIENTRY DdiEnumVidPnCofuncModality(IN_CONST_HANDLE context, IN_
             }
             if (!NT_SUCCESS(s2)) { ti->pfnReleasePathInfo(topology, path); return s2; }
         }
-        // Path: no scaling, no rotation, wherever Windows has not decided yet.
+        // Path: no rotation; scaling: identity for the screen's own mode, centred / stretched / aspect-ratio for a
+        // smaller one (both while the source mode is open), wherever Windows has not decided yet.
         D3DKMDT_VIDPN_PRESENT_PATH update = *path;
         BOOLEAN changed = FALSE;
         if (path->ContentTransformation.Scaling == D3DKMDT_VPPS_UNPINNED &&
             !(arg->EnumPivotType == D3DKMDT_EPT_SCALING && arg->EnumPivot.VidPnSourceId == path->VidPnSourceId && arg->EnumPivot.VidPnTargetId == path->VidPnTargetId)) {
             RtlZeroMemory(&update.ContentTransformation.ScalingSupport, sizeof update.ContentTransformation.ScalingSupport);
-            update.ContentTransformation.ScalingSupport.Identity = 1;
+            update.ContentTransformation.ScalingSupport.Identity = !srcScaled;
+            if (LowerModesOn(d) && (srcScaled || !srcPinned)) {
+                update.ContentTransformation.ScalingSupport.Centered = 1;
+                update.ContentTransformation.ScalingSupport.Stretched = 1;
+                update.ContentTransformation.ScalingSupport.AspectRatioCenteredMax = 1;
+            }
+            if (!update.ContentTransformation.ScalingSupport.Centered) update.ContentTransformation.ScalingSupport.Identity = 1;   // never an empty set
             changed = TRUE;
         }
         if (path->ContentTransformation.Rotation == D3DKMDT_VPPR_UNPINNED &&
@@ -882,16 +969,32 @@ static NTSTATUS APIENTRY DdiCommitVidPn(IN_CONST_HANDLE context, IN_CONST_PDXGKA
         if (NT_SUCCESS(vi->pfnAcquireSourceModeSet(arg->hFunctionalVidPn, arg->AffectedVidPnSourceId, &set, &si))) {
             const D3DKMDT_VIDPN_SOURCE_MODE* pinned = NULL;
             if (NT_SUCCESS(si->pfnAcquirePinnedModeInfo(set, &pinned)) && pinned) {
-                LogF("commit: source %u %ux%u format %u", arg->AffectedVidPnSourceId, pinned->Format.Graphics.PrimSurfSize.cx,
-                     pinned->Format.Graphics.PrimSurfSize.cy, (ULONG)pinned->Format.Graphics.PixelFormat);
+                d->modeW = pinned->Format.Graphics.PrimSurfSize.cx;
+                d->modeH = pinned->Format.Graphics.PrimSurfSize.cy;
                 si->pfnReleaseModeInfo(set, pinned);
             }
             vi->pfnReleaseSourceModeSet(arg->hFunctionalVidPn, set);
         }
+        // The path's scaling (how a smaller mode is put on the screen).
+        D3DKMDT_HVIDPNTOPOLOGY topology = NULL;
+        const DXGK_VIDPNTOPOLOGY_INTERFACE* ti = NULL;
+        const D3DKMDT_VIDPN_PRESENT_PATH* path = NULL;
+        if (NT_SUCCESS(vi->pfnGetTopology(arg->hFunctionalVidPn, &topology, &ti)) && NT_SUCCESS(ti->pfnAcquireFirstPathInfo(topology, &path)) && path) {
+            d->scaling = (ULONG)path->ContentTransformation.Scaling;
+            ti->pfnReleasePathInfo(topology, path);
+        }
+        LogF("commit: source %u %ux%u (screen %ux%u), scaling %u", arg->AffectedVidPnSourceId, d->modeW, d->modeH, d->width, d->height, d->scaling);
     }
     return STATUS_SUCCESS;
 }
-static NTSTATUS APIENTRY DdiUpdateActiveVidPnPresentPath(IN_CONST_HANDLE, IN_CONST_PDXGKARG_UPDATEACTIVEVIDPNPRESENTPATH_CONST) { Tr tr("DdiUpdateActiveVidPnPresentPath"); return STATUS_SUCCESS; }
+static NTSTATUS APIENTRY DdiUpdateActiveVidPnPresentPath(IN_CONST_HANDLE context, IN_CONST_PDXGKARG_UPDATEACTIVEVIDPNPRESENTPATH_CONST arg)
+{
+    Tr tr("DdiUpdateActiveVidPnPresentPath");
+    Device* d = (Device*)context;
+    d->scaling = (ULONG)arg->VidPnPresentPathInfo.ContentTransformation.Scaling;
+    LogF("path update: scaling %u", d->scaling);
+    return STATUS_SUCCESS;
+}
 
 static NTSTATUS APIENTRY DdiRecommendMonitorModes(IN_CONST_HANDLE context, IN_CONST_PDXGKARG_RECOMMENDMONITORMODES_CONST arg)
 {
@@ -916,11 +1019,12 @@ static NTSTATUS APIENTRY DdiRecommendMonitorModes(IN_CONST_HANDLE context, IN_CO
     return st;
 }
 
-static NTSTATUS APIENTRY DdiQueryVidPnHWCapability(IN_CONST_HANDLE, INOUT_PDXGKARG_QUERYVIDPNHWCAPABILITY arg)
+static NTSTATUS APIENTRY DdiQueryVidPnHWCapability(IN_CONST_HANDLE context, INOUT_PDXGKARG_QUERYVIDPNHWCAPABILITY arg)
 {
     Tr tr("DdiQueryVidPnHWCapability");
+    Device* d = (Device*)context;
     arg->VidPnHWCaps.DriverRotation = FALSE;
-    arg->VidPnHWCaps.DriverScaling = FALSE;
+    arg->VidPnHWCaps.DriverScaling = d->modeW && (d->modeW != d->width || d->modeH != d->height);   // a lower mode: we scale it
     arg->VidPnHWCaps.DriverCloning = FALSE;
     arg->VidPnHWCaps.DriverColorConvert = FALSE;
     arg->VidPnHWCaps.DriverLinkedAdapaterOutput = FALSE;
@@ -1251,6 +1355,14 @@ static ULONG BppOf(ULONG format)
     default: return 4;
     }
 }
+// Bytes per pixel of an allocation: from the format only where it is a D3DDDIFORMAT (Windows' standard allocations and
+// GDI surfaces); our Direct3D drivers' own allocations keep other format numbers there (DXGI 28 is 32-bit RGBA) and are
+// always 4 bytes a pixel here.
+static ULONG PixBytes(const Alloc* a)
+{
+    ULONG k = a->info.kind & 0xFF;
+    return (k == P5A_PRIMARY || k == P5A_SHADOW || k == P5A_GDI) ? BppOf(a->info.format) : 4;
+}
 // The aperture segment (GDI's CPU-visible surfaces): system memory, cache-coherent. Its addresses are ours to choose.
 static const ULONGLONG kApBase = 0x1000000000ull, kApBytes = 0x10000000ull;
 static UCHAR* ApPtr(Alloc* a, ULONGLONG addr, ULONGLONG bytes)
@@ -1547,6 +1659,8 @@ static void DoBlt(Device* d, const Op* op)
     Alloc *s = op->src, *t = op->dst;
     if (!s || !t) return;
     if ((KindOf(s) == P5A_GDI && BppOf(s->info.format) != 4) || (KindOf(t) == P5A_GDI && BppOf(t->info.format) != 4)) { d->skipped++; return; }
+    const ULONG pb = PixBytes(t);                            // 4, or 2 in a 16-bit display mode (primary and shadow)
+    if (PixBytes(s) != pb || (pb != 4 && pb != 2)) { d->skipped++; return; }
     UCHAR *sp = AnyPtr(d, op->srcSeg, op->srcAddr, s, s->info.bytes), *tp = AnyPtr(d, op->dstSeg, op->dstAddr, t, t->info.bytes);
     if (!sp || !tp || sp == tp) { d->skipped++; return; }
     if ((s->info.kind | t->info.kind) & 0x100) {             // shared surfaces of our Direct3D driver: what travels (first few)
@@ -1568,9 +1682,9 @@ static void DoBlt(Device* d, const Op* op)
         if (r.right + dx > (LONG)s->info.width) r.right = (LONG)s->info.width - dx;
         if (r.bottom + dy > (LONG)s->info.height) r.bottom = (LONG)s->info.height - dy;
         if (r.left >= r.right || r.top >= r.bottom) continue;
-        SIZE_T bytes = (SIZE_T)(r.right - r.left) * 4;
+        SIZE_T bytes = (SIZE_T)(r.right - r.left) * pb;
         for (LONG y = r.top; y < r.bottom; ++y)
-            CopyWc(tp + (SIZE_T)y * t->info.pitch + (SIZE_T)r.left * 4, sp + (SIZE_T)(y + dy) * s->info.pitch + (SIZE_T)(r.left + dx) * 4, bytes);
+            CopyWc(tp + (SIZE_T)y * t->info.pitch + (SIZE_T)r.left * pb, sp + (SIZE_T)(y + dy) * s->info.pitch + (SIZE_T)(r.left + dx) * pb, bytes);
     }
     d->blts++;
 }
@@ -1580,6 +1694,8 @@ static void DoFill(Device* d, const Op* op)
     Alloc* t = op->dst;
     if (!t) return;
     if (KindOf(t) == P5A_GDI && BppOf(t->info.format) != 4) { d->skipped++; return; }
+    const ULONG pb = PixBytes(t);
+    if (pb != 4 && pb != 2) { d->skipped++; return; }
     UCHAR* tp = AnyPtr(d, op->dstSeg, op->dstAddr, t, t->info.bytes);
     if (!tp) { d->skipped++; return; }
     ULONG n = op->nrects ? op->nrects : 1;
@@ -1587,6 +1703,11 @@ static void DoFill(Device* d, const Op* op)
         RECT r = op->nrects ? op->rects[i] : op->dstRect;
         ClipTo(&r, (LONG)t->info.width, (LONG)t->info.height);
         for (LONG y = r.top; y < r.bottom; ++y) {
+            if (pb == 2) {
+                USHORT* row = (USHORT*)(tp + (SIZE_T)y * t->info.pitch);
+                for (LONG x = r.left; x < r.right; ++x) row[x] = (USHORT)op->color;
+                continue;
+            }
             ULONG* row = (ULONG*)(tp + (SIZE_T)y * t->info.pitch);
             for (LONG x = r.left; x < r.right; ++x) row[x] = op->color;
         }
@@ -1951,10 +2072,118 @@ static void DoPage(Device* d, const Op* op, const PFN_NUMBER* own)
     }
 }
 
-// Only when flips are not possible: the picture Windows wants on the screen, copied into the frame buffer.
+// A picture of another size than the screen (a lower display mode), scaled into the frame buffer: nearest pixel, each
+// source row read once (streaming loads) and widened in cached memory, then written out for every screen row it
+// covers. Placement: keep the aspect ratio, centred, black bars (default; also for "identity"/"stretched" from
+// Windows), "centered" = 1:1 when it fits. Registry value ScaleMode=1 follows Windows' "stretched" too.
+// Only when something may have changed (2026-11-25: every tick cost ~4 ms at 2560x1440): a flip or a new source, or
+// submitted work / CPU copies since the last picture; then for ~133 ms more (the GPU may still be finishing the frame
+// that was flipped to: the engine reports work done before the GPU has run it), and else every ~250 ms. In ticks of
+// the screen's refresh (60 Hz: 8 and 15; 120 Hz: 16 and 30).
+// Registry value ScaleEveryTick=1 copies on every tick as before.
+static ULONG gScaleSrc[16384], gScaleRow[16384], gScaleX[16384];   // engine thread only
+static ULONG gScaleLastOn;                                   // 0: the frame buffer may hold anything (bars to clear)
+
+// Streaming (non-temporal) stores into write-combined memory: no reads for ownership, no cache pollution.
+__attribute__((target("sse2"))) static void StoreWc(UCHAR* dst, const UCHAR* src, SIZE_T n)
+{
+    while (n && ((ULONG_PTR)dst & 15)) { *dst++ = *src++; --n; }
+    while (n >= 64) {
+        P5V a, b, c, e;
+        __builtin_memcpy(&a, src, 16); __builtin_memcpy(&b, src + 16, 16); __builtin_memcpy(&c, src + 32, 16); __builtin_memcpy(&e, src + 48, 16);
+        __builtin_nontemporal_store(a, (P5V*)dst); __builtin_nontemporal_store(b, (P5V*)(dst + 16));
+        __builtin_nontemporal_store(c, (P5V*)(dst + 32)); __builtin_nontemporal_store(e, (P5V*)(dst + 48));
+        src += 64; dst += 64; n -= 64;
+    }
+    while (n >= 16) { P5V a; __builtin_memcpy(&a, src, 16); __builtin_nontemporal_store(a, (P5V*)dst); src += 16; dst += 16; n -= 16; }
+    while (n) { *dst++ = *src++; --n; }
+}
+
+static void ShowScaled(Device* d)
+{
+    static RECT last;                                        // where the last picture went (the bars are cleared on a change)
+    static ULONG lastW, lastDw;
+    ULONG& lastOn = gScaleLastOn;
+    // Anything new since the last picture?
+    static ULONGLONG seen, seenAddr;
+    static ULONG trail, idle, everyTick = 2;
+    if (everyTick == 2) everyTick = RegGet(L"ScaleEveryTick", 0) == 1;
+    const ULONG hz = d->refreshNum && d->refreshDen ? (d->refreshNum + d->refreshDen / 2) / d->refreshDen : 60;
+    const ULONG kTrail = hz * 2 / 15 > 2 ? hz * 2 / 15 : 2, kIdleTicks = hz / 4 > 2 ? hz / 4 : 2;
+    const ULONGLONG now = (ULONGLONG)(ULONG)d->lastSubmitted + d->blts + d->fills + d->renders + d->renderKms + d->presents3;
+    const ULONGLONG addr = (ULONGLONG)d->sourceAddress.QuadPart;
+    if (d->sourceChanged || now != seen || addr != seenAddr || !lastOn) trail = kTrail;
+    seen = now;
+    seenAddr = addr;
+    if (!everyTick) {
+        if (trail) --trail;
+        else if (++idle < kIdleTicks) { d->scaleSkips++; d->scaleSkipTotal++; return; }
+    }
+    idle = 0;
+    const ULONG w = d->srcW, h = d->srcH, pitch = d->srcPitch, bpp = d->srcBpp == 2 ? 2 : 4, W = d->width, H = d->height;
+    if (!w || !h || w > 16384 || h > 16384 || pitch < w * bpp) return;
+    const UCHAR* s = SegPtr(d, (ULONGLONG)d->sourceAddress.QuadPart, (ULONGLONG)pitch * (h - 1) + (ULONGLONG)w * bpp);
+    if (!s) return;
+    static ULONG stretchOk = 2;
+    if (stretchOk == 2) stretchOk = RegGet(L"ScaleMode", 0) == 1;
+    ULONG dw, dh;
+    const ULONG sc = d->scaling;
+    if (sc == D3DKMDT_VPPS_CENTERED && w <= W && h <= H) { dw = w; dh = h; }
+    else if (sc == D3DKMDT_VPPS_STRETCHED && stretchOk) { dw = W; dh = H; }
+    else if ((ULONGLONG)w * H <= (ULONGLONG)h * W) { dh = H; dw = (ULONG)((ULONGLONG)w * H / h); }   // narrower than the screen: bars left and right
+    else { dw = W; dh = (ULONG)((ULONGLONG)h * W / w); }                                              // wider: bars top and bottom
+    if (!dw || !dh) return;
+    RECT r = { (LONG)((W - dw) / 2), (LONG)((H - dh) / 2), (LONG)((W - dw) / 2 + dw), (LONG)((H - dh) / 2 + dh) };
+    if (!lastOn || r.left != last.left || r.top != last.top || r.right != last.right || r.bottom != last.bottom) {
+        BlackOut(d);
+        last = r;
+        lastOn = 1;
+        LogF("scaling: source %ux%u pitch %u, %u bytes/pixel -> %ux%u at %d,%d (Windows' scaling %u)", w, h, pitch, bpp, dw, dh, r.left, r.top, sc);
+    }
+    if (lastW != w || lastDw != dw) {
+        for (ULONG i = 0; i < dw; ++i) gScaleX[i] = (ULONG)((ULONGLONG)i * w / dw);
+        lastW = w;
+        lastDw = dw;
+    }
+    LONGLONG t0 = KeQueryPerformanceCounter(NULL).QuadPart;
+    ULONG have = ~0u;
+    for (ULONG j = 0; j < dh; ++j) {
+        ULONG sy = (ULONG)((ULONGLONG)j * h / dh);
+        if (sy != have) {
+            CopyWc((UCHAR*)gScaleSrc, s + (SIZE_T)sy * pitch, (SIZE_T)w * bpp);
+            if (bpp == 4) {
+                for (ULONG i = 0; i < dw; ++i) gScaleRow[i] = gScaleSrc[gScaleX[i]];
+            } else {                                         // R5G6B5 -> X8R8G8B8, each channel's top bits repeated below
+                const USHORT* p16 = (const USHORT*)gScaleSrc;
+                for (ULONG i = 0; i < dw; ++i) {
+                    ULONG v = p16[gScaleX[i]], r5 = v >> 11, g6 = (v >> 5) & 0x3F, b5 = v & 0x1F;
+                    gScaleRow[i] = 0xFF000000u | ((r5 << 3 | r5 >> 2) << 16) | ((g6 << 2 | g6 >> 4) << 8) | (b5 << 3 | b5 >> 2);
+                }
+            }
+            have = sy;
+        }
+        StoreWc(d->fb + (SIZE_T)(r.top + j) * d->pitch + (SIZE_T)r.left * 4, (const UCHAR*)gScaleRow, (SIZE_T)dw * 4);
+    }
+    __builtin_ia32_sfence();
+    LARGE_INTEGER freq;
+    LONGLONG t1 = KeQueryPerformanceCounter(&freq).QuadPart;
+    ULONG us = (ULONG)((t1 - t0) * 1000000 / (freq.QuadPart ? freq.QuadPart : 1));
+    d->scaleFrames++;
+    d->scaleTotal++;
+    d->scaleUsLast = us;
+    d->scaleUsSum += us;
+    if (us > d->scaleUsMax) d->scaleUsMax = us;
+    d->copies++;
+}
+
+// The picture Windows wants on the screen, copied into the frame buffer: when flips are not possible, or scaled when
+// it is not the screen's size (a lower display mode).
 static void ShowSource(Device* d)
 {
-    if (d->flipOk || !d->fb || !d->visible || !d->source) return;
+    if (!d->fb || !d->visible || !d->source) { gScaleLastOn = 0; return; }
+    if (d->scaleOn) { ShowScaled(d); return; }
+    gScaleLastOn = 0;
+    if (d->flipOk) return;
     const UCHAR* s = SegPtr(d, (ULONGLONG)d->sourceAddress.QuadPart, d->fbBytes);
     if (!s) return;
     for (ULONG y = 0; y < d->height; ++y) CopyWc(d->fb + (SIZE_T)y * d->pitch, s + (SIZE_T)y * d->pitch, (SIZE_T)d->width * 4);
@@ -2152,6 +2381,11 @@ static VOID EngineThread(PVOID context)
                 RegSet(L"FullAllocs", (ULONG)d->allocs, FALSE);
                 RegSet(L"FullDevices", (ULONG)d->devices, FALSE);
                 RegSet(L"FullDropped", d->dropped, FALSE);
+                if (d->scaleTotal) {
+                    RegSet(L"ScaleCopies", d->scaleTotal, FALSE);
+                    RegSet(L"ScaleSkips", d->scaleSkipTotal, FALSE);
+                    RegSet(L"ScaleUs", d->scaleUsLast, FALSE);
+                }
                 LogFlush();
                 static ULONG beats;
                 if (++beats <= 60 || beats % 30 == 0)
@@ -2159,6 +2393,11 @@ static VOID EngineThread(PVOID context)
                            d->vsyncs, d->lastSubmitted, d->lastCompleted, d->presents3, d->blts, d->fills, d->skipped, d->flipsDone, d->flipsHeld, d->copies, d->renders, d->allocs,
                            d->devices, d->contexts, d->pageIns, d->pageOuts, d->pageMoves, d->pageFills, d->pageFails, d->dropped);
                 if (gWddm2 && (beats <= 60 || beats % 30 == 0)) W2Summary();
+                if (d->scaleFrames && (beats <= 60 || beats % 30 == 0)) {
+                    TraceF("scaled: mode %ux%u source %ux%u frames %u (skipped %u), %u us average, %u us max", d->modeW, d->modeH, d->srcW, d->srcH, d->scaleFrames,
+                           d->scaleSkips, d->scaleUsSum / d->scaleFrames, d->scaleUsMax);
+                    d->scaleFrames = d->scaleUsSum = d->scaleUsMax = d->scaleSkips = 0;
+                }
                 if (gGdiAccel)
                     TraceF("gdi: renderkm %u | blt %u fill %u alpha %u stretch %u transparent %u cleartype %u | skipped %u lost %u | aperture map %u unmap %u fail %u",
                            d->renderKms, d->gdiOps[1], d->gdiOps[2], d->gdiOps[3], d->gdiOps[4], d->gdiOps[6], d->gdiOps[7], d->gdiSkips, d->gdiNoTicket, d->apMaps, d->apUnmaps, d->apFails);
@@ -2613,7 +2852,7 @@ static NTSTATUS APIENTRY DdiGetStandardAllocationDriverData(IN_CONST_HANDLE, INO
         a->width = p->Width;
         a->height = p->Height;
         a->format = (ULONG)p->Format;
-        p->Pitch = p->Width * 4;
+        p->Pitch = p->Width * BppOf(a->format);
         break;
     }
     case D3DKMDT_STANDARDALLOCATION_STAGINGSURFACE: {
@@ -2660,7 +2899,7 @@ static NTSTATUS APIENTRY DdiGetStandardAllocationDriverData(IN_CONST_HANDLE, INO
         LogF("standard allocation type %u: not supported", (ULONG)arg->StandardAllocationType);
         return STATUS_NOT_SUPPORTED;
     }
-    a->pitch = a->width * 4;
+    a->pitch = a->width * ((a->kind == P5A_PRIMARY || a->kind == P5A_SHADOW) ? BppOf(a->format) : 4);   // 16-bit modes: 2 bytes a pixel
     a->bytes = (ULONGLONG)a->pitch * a->height;
     LogF("standard allocation kind %u: %ux%u format %u", a->kind, a->width, a->height, a->format);
     return STATUS_SUCCESS;
@@ -3532,7 +3771,7 @@ static NTSTATUS APIENTRY DdiEscape(IN_CONST_HANDLE adapter, IN_CONST_PDXGKARG_ES
         Device* d = (Device*)adapter;
         ULONG size = *(const ULONG*)(e + 1);
         ULONGLONG bytes = (ULONGLONG)d->pitch * d->height;
-        const UCHAR* pic = d->source ? SegPtr(d, (ULONGLONG)d->sourceAddress.QuadPart, bytes) : NULL;
+        const UCHAR* pic = d->source && !d->scaleOn ? SegPtr(d, (ULONGLONG)d->sourceAddress.QuadPart, bytes) : NULL;
         if (!pic) pic = d->fb;
         ULONGLONG off = e->va;
         e->value = 0;
@@ -3606,11 +3845,27 @@ static NTSTATUS APIENTRY DdiSetVidPnSourceAddress(IN_CONST_HANDLE context, IN_CO
         if (InterlockedIncrement(&said) <= 30)
             TraceF("source address %I64X segment %u flags %X (alloc %p, visible %ld)", (ULONGLONG)arg->PrimaryAddress.QuadPart, arg->PrimarySegment, arg->Flags.Value, arg->hAllocation, d->visible);
     }
-    d->source = (Alloc*)arg->hAllocation;
+    Alloc* a = (Alloc*)arg->hAllocation;
+    // The picture's own size: only one of the screen's size and pitch can be flipped to; any other is scaled into the
+    // frame buffer by the engine thread (ShowSource), with the display left on the frame buffer.
+    ULONG w = a ? a->info.width : d->width, h = a ? a->info.height : d->height, pitch = a ? a->info.pitch : d->pitch;
+    ULONG bpp = a ? PixBytes(a) : 4;
+    if (bpp == 4 && pitch < w * 4 && pitch >= w * 2) bpp = 2;   // a 16-bit picture of our Direct3D driver (DXGI format number)
+    const BOOLEAN fits = w == d->width && h == d->height && pitch == d->pitch && bpp == 4;
+    d->srcBpp = bpp;
+    d->srcW = w;
+    d->srcH = h;
+    d->srcPitch = pitch;
+    d->source = a;
     d->sourceAddress = arg->PrimaryAddress;
+    InterlockedExchange(&d->scaleOn, fits ? 0 : 1);
     InterlockedExchange(&d->sourceChanged, 1);
     // May be called at a raised interrupt level: nothing here but the flip's register writes.
-    if (d->visible && arg->PrimarySegment == 1 && SegPtr(d, (ULONGLONG)arg->PrimaryAddress.QuadPart, d->fbBytes)) FlipTo(d, (ULONGLONG)arg->PrimaryAddress.QuadPart);
+    if (!fits) {
+        if (d->flipOk && d->shownPhys != d->fbScan) FlipTo(d, d->fbScan);
+    } else if (d->visible && arg->PrimarySegment == 1 && SegPtr(d, (ULONGLONG)arg->PrimaryAddress.QuadPart, d->fbBytes)) {
+        FlipTo(d, (ULONGLONG)arg->PrimaryAddress.QuadPart);
+    }
     return STATUS_SUCCESS;
 }
 
@@ -3622,7 +3877,7 @@ static NTSTATUS APIENTRY FullSetVidPnSourceVisibility(IN_CONST_HANDLE context, I
     if (!arg->Visible) {
         BlackOut(d);
         ShowFrameBuffer(d);
-    } else if (d->source && SegPtr(d, (ULONGLONG)d->sourceAddress.QuadPart, d->fbBytes)) {
+    } else if (d->source && !d->scaleOn && SegPtr(d, (ULONGLONG)d->sourceAddress.QuadPart, d->fbBytes)) {
         FlipTo(d, (ULONGLONG)d->sourceAddress.QuadPart);
     }
     LogF("visible %u (source at %I64X)", (ULONG)arg->Visible, (ULONGLONG)d->sourceAddress.QuadPart);

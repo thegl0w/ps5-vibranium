@@ -1,0 +1,59 @@
+diff --git a/src/d3d9/d3d9_adapter.cpp b/src/d3d9/d3d9_adapter.cpp
+index 32a33c4..ff79c5d 100644
+--- a/src/d3d9/d3d9_adapter.cpp
++++ b/src/d3d9/d3d9_adapter.cpp
+@@ -1001,13 +1001,26 @@ namespace dxvk {
+ 
+     uint32_t modeIndex = 0;
+ 
++    // ps5win: Windows 8+ lists no 8/16 bpp display modes for full WDDM drivers (dxgkrnl keeps them off the
++    // GDI mode list); native D3D9 still offers its 16-bit formats on every 32-bit mode and converts. Do the
++    // same: if the display has no mode at the requested depth, take the 32-bit modes for it (old games look
++    // for 640x480x16 and give up otherwise). The mode switch falls back to 32 bpp (Win32 WSI setWindowMode).
++    uint32_t wantBpp = GetMonitorFormatBpp(Format);
++    if (wantBpp < 32) {
++      bool have = false;
++      for (uint32_t i = 0; !have && wsi::getDisplayMode(wsi::getDefaultMonitor(), i, &devMode); i++)
++        have = devMode.bitsPerPixel == wantBpp;
++      if (!have)
++        wantBpp = 32;
++    }
++
+     while (wsi::getDisplayMode(wsi::getDefaultMonitor(), modeIndex++, &devMode)) {
+       // Skip interlaced modes altogether
+       if (devMode.interlaced)
+         continue;
+ 
+       // Skip modes with incompatible formats
+-      if (devMode.bitsPerPixel != GetMonitorFormatBpp(Format))
++      if (devMode.bitsPerPixel != wantBpp)
+         continue;
+ 
+       if (!forcedRatio.undefined() &&
+diff --git a/src/wsi/win32/wsi_window_win32.cpp b/src/wsi/win32/wsi_window_win32.cpp
+index 9b7fa4f..62b22dd 100644
+--- a/src/wsi/win32/wsi_window_win32.cpp
++++ b/src/wsi/win32/wsi_window_win32.cpp
+@@ -198,7 +198,21 @@ namespace dxvk::wsi {
+     Logger::info(str::format("Setting display mode: ",
+       devMode.dmPelsWidth, "x", devMode.dmPelsHeight, "@",
+       devMode.dmDisplayFrequency));
+-    
++
++    // ps5win: a 16/8 bpp mode the display does not list (full WDDM drivers on Windows 8+ have none; d3d9's
++    // mode list offers the 32-bit modes for those formats) is set as the same mode at 32 bpp.
++    if (devMode.dmBitsPerPel < 32) {
++      DEVMODEW probe = { };
++      probe.dmSize = sizeof(probe);
++      bool have = false;
++      for (DWORD i = 0; !have && ::EnumDisplaySettingsW(monInfo.szDevice, i, &probe); i++)
++        have = probe.dmBitsPerPel == devMode.dmBitsPerPel;
++      if (!have) {
++        Logger::info(str::format("No ", devMode.dmBitsPerPel, " bpp display modes, setting 32 bpp instead"));
++        devMode.dmBitsPerPel = 32;
++      }
++    }
++
+     return setMonitorDisplayMode(hMonitor, &devMode);
+   }
+ 

@@ -45,13 +45,26 @@ done
 # Display: the screen's own (preferred) resolution, up to 3840x2160, at the highest refresh rate it offers up to
 # 120 Hz (kms_linear.py). Optional lines in ps5win-display.txt on the PS5ISO partition: "max_hz=60" caps the refresh
 # rate (for screens that show no picture at 120 Hz), "mode=2560x1440" picks another resolution the screen offers.
-# Release default 2026-11-22: 60 Hz (the 120 Hz display driver isn't released yet; the shipped driver reports 60 Hz).
-export PS5WIN_MAX_HZ=60
+# Default up to 120 Hz since release 1.3 (1.0-1.2 capped at 60 Hz; the driver measures the real rate). If the faster
+# HDMI link does not come up, kms_linear.py falls back to the mode nearest 60 Hz by itself.
+export PS5WIN_MAX_HZ=120
 if [ -f /mnt/ps5iso/ps5win-display.txt ]; then
   hz=$(sed -n 's/^max_hz=\([0-9]\{2,3\}\)\r\?$/\1/p' /mnt/ps5iso/ps5win-display.txt | head -n 1)
   [ -n "$hz" ] && export PS5WIN_MAX_HZ=$hz && say "Display: refresh capped at $hz Hz (ps5win-display.txt)"
   mode=$(sed -n 's/^mode=\([0-9]\{3,4\}x[0-9]\{3,4\}\)\r\?$/\1/p' /mnt/ps5iso/ps5win-display.txt | head -n 1)
   [ -n "$mode" ] && export PS5WIN_MODE=$mode && say "Display: $mode asked for (ps5win-display.txt)"
+fi
+# The display decisions (modes the screen offers, the one chosen, the link check) to PS5ISO\logs\display-last.txt, where
+# Windows can read them: kms_linear.py's log is only in RAM and gone after the hand-over. Copied in the background as soon
+# as the mode is set (run_stage.sh still has seconds of work before the hand-over), never during it. Mode lines only.
+if mountpoint -q /mnt/ps5iso; then
+  (
+    for i in $(seq 1 300); do grep -q "SETCRTC done" "$run/kms.log" 2>/dev/null && break; sleep 0.5; done
+    { echo "ps5win display log $(date '+%Y-%m-%d %H:%M:%S') (max ${PS5WIN_MAX_HZ} Hz${PS5WIN_MODE:+, asked $PS5WIN_MODE})"
+      grep -E "mode [0-9]+x[0-9]+@|^chosen mode|^LINK|^SETCRTC" "$run/kms.log" 2>/dev/null || echo "(no display log)"
+    } > /tmp/ps5win-display-last.txt 2>/dev/null
+    mkdir -p /mnt/ps5iso/logs 2>/dev/null && cp /tmp/ps5win-display-last.txt /mnt/ps5iso/logs/display-last.txt 2>/dev/null && sync -f /mnt/ps5iso/logs/display-last.txt 2>/dev/null
+  ) &
 fi
 say "Starting Windows (GPU clock ${GFXCLK_MHZ:-2000} MHz)..."
 cd "$run" && GFXCLK_MHZ=${GFXCLK_MHZ:-2000} bash run_stage.sh "$run/windows.bzImage" "$run/windows.bundle" 2>&1 | tee -a "$log"

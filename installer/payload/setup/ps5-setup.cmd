@@ -57,6 +57,9 @@ call :step gamebar powershell -NoProfile -ExecutionPolicy Bypass -File C:\ps5\se
 rem 7c. Shader cache folders (DXVK, vkd3d-proton, Mesa) and VKD3D_SHADER_CACHE_PATH in the Default profile
 call :step shader-cache powershell -NoProfile -ExecutionPolicy Bypass -File C:\ps5\setup\shader-cache-dirs.ps1
 
+rem 7d. DirectPlay (Legacy Components) for old games, from the image itself (some will not start without it)
+call :step directplay cmd /c C:\ps5\setup\directplay.cmd
+
 rem 8. GPU autostart and the temperature/GPU watchdog, both SYSTEM at boot (XML: no 72-hour limit on the watchdog)
 call :step task-autostart schtasks /create /f /tn ps5-gpu-autostart /xml C:\ps5\setup\tasks\ps5-gpu-autostart.xml
 call :step task-guard schtasks /create /f /tn ps5-guard /xml C:\ps5\setup\tasks\ps5-guard.xml

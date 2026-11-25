@@ -88,7 +88,7 @@ ps5gpu/wddm/ntload.c
 ps5gpu/wddm/p5min.c
 ps5gpu/wddm/ps5wddm.cpp
 # v1.0.1: the display driver INF exactly as it ships (DX12 release package: WDDM 2.0 default, DriverVer 31.x)
-build/dx12-release/wddm/ps5wddm.inf => ps5gpu/wddm/ps5wddm.inf
+ps5gpu/wddm/ps5wddm-release.inf => ps5gpu/wddm/ps5wddm.inf
 ps5gpu/wddm/WDDM2-TABLE.md
 ps5gpu/mesa/mesa-ps5.patch
 ps5gpu/mesa/mesa-ps5-dx12.patch
@@ -106,6 +106,8 @@ ps5gpu/d3d12/vkd3d-patches/README.md
 ps5gpu/d3d12/UMD-TABLE.md
 ps5gpu/mesa/configure.sh
 ps5gpu/mesa/mingw-cross.txt
+ps5gpu/mesa/mingw-cross32.txt
+ps5gpu/dxvk/
 ps5gpu/mesa/ac_ps5_drm.cpp
 ps5gpu/mesa/shim/
 ps5gpu/win/start.cmd

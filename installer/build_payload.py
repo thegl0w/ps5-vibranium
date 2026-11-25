@@ -13,7 +13,7 @@ Checks (any failure = exit 1, nothing half-written is left marked as good):
   - kernel drivers: AMD64, native subsystem, no HIGH_ENTROPY_VA / TERMINAL_SERVER_AWARE (Windows 10 refuses those:
     0xC0000018), an Authenticode signature present
   - each INF's CatalogFile is staged next to it; ps5wddm.inf's user-mode driver path is staged
-  - DLL machine type matches its folder (vk32/d3d32/d3d12umd32/x86 loader = i386, the rest AMD64)
+  - DLL machine type matches its folder (vk32/d3d32/d3d12umd32/gl32/x86 loader = i386, the rest AMD64)
   - Vulkan manifests point at a DLL that is staged next to them
   - every DLL a staged program or library imports is staged in the same folder, or is a Windows DLL known to be on a
     clean 19044.1288 install (a missing libwinpthread-1.dll kept the Vulkan driver from loading on every fresh
@@ -274,7 +274,7 @@ def check_driver(dest, data):
 def want_machine(dest):
     d = dest.lower()
     if d.endswith(".dll") or d.endswith(".exe"):
-        return I386 if (d.startswith(("gpu\\vk32\\", "gpu\\d3d32\\", "gpu\\d3d12umd32\\")) or d.endswith("x86.dll")) else AMD64
+        return I386 if (d.startswith(("gpu\\vk32\\", "gpu\\d3d32\\", "gpu\\d3d12umd32\\", "gpu\\gl32\\")) or d.endswith("x86.dll")) else AMD64
     return None
 
 

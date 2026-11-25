@@ -33,10 +33,10 @@ gpu\warm-restart-off.cmd      | installer/payload/warm/warm-restart-off.cmd     
 # autostart.cmd above does not). Built from the published ps5gpu/wddm source: a rebuild on 2026-11-23 differs only
 # in time stamps / checksum / PDB id (.text .data PAGE identical). Catalog made by New-FileCatalog (sorted).
 # Replaces the r7 60 Hz build (0.3.1121.32982), whose exact source was not kept. Refresh rate: the launcher caps it.
-gpu\wddm\ps5wddm.sys           | build/release-signed/wddm/ps5wddm.sys                               | driver
-gpu\wddm\ps5wddm.inf           | build/release-signed/wddm/ps5wddm.inf                               | file
-gpu\wddm\ps5wddm.cat           | build/release-signed/wddm/ps5wddm.cat                               | signed-cat
-gpu\wddm\ps5test.cer           | build/release-signed/wddm/ps5test.cer                               | file
+gpu\wddm\ps5wddm.sys           | build/release-1.3/wddm/ps5wddm.sys   | driver
+gpu\wddm\ps5wddm.inf           | build/release-1.3/wddm/ps5wddm.inf   | file
+gpu\wddm\ps5wddm.cat           | build/release-1.3/wddm/ps5wddm.cat   | signed-cat
+gpu\wddm\ps5test.cer           | build/release-1.3/wddm/ps5test.cer   | file
 # v1.0.1 (native DX12): DWM's D3D10 driver from the GPU session's DX12 release package (adds the WDDM 2.0 picture
 # read; works in 1.3 too). both vulkan_radeon builds are PINNED to r13 (da2aa3c0 / 46e2c29a): the GPU session's D3D12 tests ran on exactly these.
 gpu\d3d10\libgallium_d3d10.dll | build/dx12-release/d3d10/libgallium_d3d10.dll                      | file
@@ -60,15 +60,17 @@ gpu\vkreg\vulkan-1.x64.dll     | build/dl-vk/loader-build/loader/vulkan-1.dll   
 gpu\vkreg\vulkan-1.x86.dll     | build/dl-vk/loader-build32/loader/vulkan-1.dll                       | file
 gpu\vkreg\ps5_icd.json         | ps5gpu/win/vkreg/ps5_icd.json                                        | file
 gpu\vkreg\vk-install.cmd       | ps5gpu/win/vkreg/vk-install.cmd                                      | script
-gpu\d3d\d3d8.dll               | build/dl-vk/dxvk/dxvk-3.1.1/x64/d3d8.dll                             | file
-gpu\d3d\d3d9.dll               | build/dl-vk/dxvk/dxvk-3.1.1/x64/d3d9.dll                             | file
+# d3d8 + d3d9 (both bitnesses): DXVK v3.1.1 with ps5gpu/dxvk/0001-d3d9-16bpp-modes-on-32bpp-displays.patch (16-bit modes
+# on 32-bit-only displays: old games that look for 640x480x16), built per ps5gpu/dxvk/README.md; the other DXVK files are stock 3.1.1.
+gpu\d3d\d3d8.dll               | build/dxvk-ps5-x64/d3d8.dll                                    | file
+gpu\d3d\d3d9.dll               | build/dxvk-ps5-x64/d3d9.dll                                    | file
 gpu\d3d\d3d10core.dll          | build/dl-vk/dxvk/dxvk-3.1.1/x64/d3d10core.dll                        | file
 gpu\d3d\d3d11.dll              | build/dl-vk/dxvk/dxvk-3.1.1/x64/d3d11.dll                            | file
 gpu\d3d\dxgi.dll               | build/dl-vk/dxvk/dxvk-3.1.1/x64/dxgi.dll                             | file
 gpu\d3d\d3d12.dll              | build/dl-d3d12/x/vkd3d-proton-3.1/x64/d3d12.dll                      | file
 gpu\d3d\d3d12core.dll          | build/dl-d3d12/x/vkd3d-proton-3.1/x64/d3d12core.dll                  | file
-gpu\d3d32\d3d8.dll             | build/dl-vk/dxvk/dxvk-3.1.1/x32/d3d8.dll                             | file
-gpu\d3d32\d3d9.dll             | build/dl-vk/dxvk/dxvk-3.1.1/x32/d3d9.dll                             | file
+gpu\d3d32\d3d8.dll             | build/dxvk-ps5-x32/d3d8.dll                                    | file
+gpu\d3d32\d3d9.dll             | build/dxvk-ps5-x32/d3d9.dll                                    | file
 gpu\d3d32\d3d10core.dll        | build/dl-vk/dxvk/dxvk-3.1.1/x32/d3d10core.dll                        | file
 gpu\d3d32\d3d11.dll            | build/dl-vk/dxvk/dxvk-3.1.1/x32/d3d11.dll                            | file
 gpu\d3d32\dxgi.dll             | build/dl-vk/dxvk/dxvk-3.1.1/x32/dxgi.dll                             | file
@@ -77,6 +79,9 @@ gpu\d3d32\d3d12core.dll        | build/dl-d3d12/x/vkd3d-proton-3.1/x86/d3d12core
 gpu\gl\opengl32.dll            | build/glpkg/opengl32.dll                                             | file
 gpu\gl\libgallium_wgl.dll      | build/glpkg/libgallium_wgl.dll                                       | file
 gpu\gl\libwinpthread-1.dll     | build/winpthreads/x64/libwinpthread-1.dll                            | file
+gpu\gl32\opengl32.dll          | build/glpkg32/opengl32.dll                                           | file
+gpu\gl32\libgallium_wgl.dll    | build/glpkg32/libgallium_wgl.dll                                     | file
+gpu\gl32\libwinpthread-1.dll   | build/winpthreads/x86/libwinpthread-1.dll                            | file
 gpu\kit\ps5-gamekit.ps1        | ps5gpu/win/kit/ps5-gamekit.ps1                                       | script
 gpu\kit\kit-install.cmd        | ps5gpu/win/kit/kit-install.cmd                                       | script
 gpu\kit\kit-install.ps1        | ps5gpu/win/kit/kit-install.ps1                                       | script
@@ -89,6 +94,7 @@ ps5therm.exe                   | build/ps5therm/ps5therm.exe                    
 ps5guard.cmd                   | installer/payload/warm/ps5guard.cmd                                  | script
 ps5warm.exe                    | installer/payload/warm/ps5warm.exe                                   | file
 setup\ps5-setup.cmd            | installer/payload/setup/ps5-setup.cmd                                | script
+setup\directplay.cmd           | installer/payload/setup/directplay.cmd                               | script
 setup\wu-tasks-off.ps1         | installer/payload/setup/wu-tasks-off.ps1                             | script
 setup\wu-tasks-system.cmd      | installer/payload/setup/wu-tasks-system.cmd                          | script
 setup\security-report.ps1      | installer/payload/setup/security-report.ps1                          | script

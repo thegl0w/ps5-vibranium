@@ -149,7 +149,7 @@ if [ -f ../build/ps5gpu/wddm/ps5wddm.sys ]; then
   sed "s#^\(eth.p5eth.cat *| *\)[^ ]*#\1$P/foreign.cat#" $M > "$P/manifest-foreigncat.txt"
   printf -- '-----BEGIN PRIVATE KEY-----\nAAAA\n-----END PRIVATE KEY-----\n' > "$P/testkey.pem"
   { cat $M; echo "gpu\\wddm\\key.pem | $P/testkey.pem | file"; } > "$P/manifest-key.txt"
-  MDEV="$P/manifest-devcert.txt"; sed -e "s#build/release-signed/wddm/#build/ps5gpu/wddm-boot/#" -e "s#build/release-signed/eth/#build/cleanroom-p5eth/#" -e "s#build/release-signed/gpu/#build/ps5gpu/#" $M > "$MDEV"   # dev-cert wddm files
+  MDEV="$P/manifest-devcert.txt"; sed -e "s#build/release-[^/ ]*/wddm/#build/ps5gpu/wddm-boot/#" -e "s#build/release-signed/eth/#build/cleanroom-p5eth/#" -e "s#build/release-signed/gpu/#build/ps5gpu/#" $M > "$MDEV"   # dev-cert wddm files
   sed "s#^\(gpu.wddm.ps5wddm.cat *| *\)[^ ]*#\1build/pdbfix-backup/ps5wddm.cat#" "$MDEV" > "$P/manifest-stalecat.txt"
   # a catalog with two equal-length members swapped (same bytes, wrong order) must be refused as unsorted
   python3 -c '

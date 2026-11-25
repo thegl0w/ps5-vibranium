@@ -14,8 +14,8 @@
 > reviewed and tested on real hardware by the author.
 
 ps5win installs **Windows 10 IoT Enterprise LTSC 2021** on a launch-model PS5 and runs it bare metal from a USB drive.
-Its own GPU driver gives Windows a GPU-accelerated desktop, Vulkan, and Direct3D 9 to 12 games through DXVK and
-vkd3d-proton.
+Its own GPU driver gives Windows a GPU-accelerated desktop, Vulkan, OpenGL, and Direct3D 8 to 12 games through DXVK
+and vkd3d-proton, including older games at their own low resolutions.
 
 **Demo:** https://youtu.be/ygxBbsQypKQ (3 minutes, firmware 13.60, boot to desktop with the ps5wddm GPU driver).
 Gameplay and a full-install video will follow.
@@ -37,11 +37,12 @@ Enterprise LTSC 2021.
 |---|---|
 | Install | Fully automatic from the USB drive: finds the ISO, shows the target disk, 30-second countdown (any key cancels), installs, starts Windows. Logs are written to the drive. |
 | Boot | The PS5 Linux loader, then Linux, then our UEFI firmware, then Windows. After the install, a 10-second countdown starts Windows by itself; any key stays in Linux. |
-| Display | Our kernel display driver (`ps5wddm`), WDDM 2.0 (native Direct3D 12); WDDM 1.3 as in 1.0 with one switch (below). It reports driver version 31.x so games that check for a recent AMD driver don't warn; it is our own driver, not an AMD one. The Windows compositor (dwm.exe) renders on the GPU. The screen's own resolution at **60 Hz** (tested at 1920×1080 and 2560×1440; 4K is untested). Optional line in `ps5win-display.txt` on PS5ISO: `mode=2560x1440` picks another resolution the screen offers. (120 Hz works in development and comes in a later release.) |
+| Display | Our kernel display driver (`ps5wddm`), WDDM 2.0 (native Direct3D 12); WDDM 1.3 as in 1.0 with one switch (below). It reports driver version 31.x so games that check for a recent AMD driver don't warn; it is our own driver, not an AMD one. The Windows compositor (dwm.exe) renders on the GPU. The screen's own resolution at up to **120 Hz** (tested at 1920×1080 and 2560×1440; 4K is untested); if the screen doesn't come up at 120 Hz it falls back to 60 Hz by itself. Lower resolutions (640×480 up to the screen's own) are offered to Windows and games and scaled to the screen, keeping the aspect ratio. Optional lines in `ps5win-display.txt` on PS5ISO: `mode=2560x1440` picks another resolution the screen offers, `max_hz=60` caps the refresh rate. What was chosen at the last start is in `logs\display-last.txt` on PS5ISO. |
 | Vulkan | Mesa RADV, ported to Windows on our own kernel interface (`libps5gpu`). 64-bit and 32-bit. |
 | Direct3D 10/11 (system) | Mesa's D3D10 user-mode driver on Zink on RADV. Runs the desktop and ordinary programs. |
+| OpenGL | Mesa's OpenGL on Zink, registered as the system OpenGL driver, 64-bit and 32-bit: every OpenGL program uses the GPU through Windows' own `opengl32.dll`, with no files next to the game. OpenGL 4.6 compatibility profile. Tested with a 1998 OpenGL game (32-bit) from Steam. |
 | Direct3D 12 (system) | Native: Windows' own Direct3D 12 runs on our driver (`ps5d3d12`, built on vkd3d-proton), 64-bit and 32-bit, no files next to the game; tested with Microsoft's Direct3D 12 samples, Unreal Engine 4 games (in game at the kit's frame rate) and Godot 4. To go back to WDDM 1.3 (as in 1.0): double-click `C:\ps5\gpu\dx12-native-off.cmd` (no admin prompt needed) and restart; `dx12-native-on.cmd` undoes it. |
-| Games | A game kit adds DXVK (D3D9/10/11) and vkd3d-proton (D3D12, still offered) next to a game's exe, automatically within seconds of the game appearing, or from the right-click menu. Tested in a window (162 fps, heavy shader) and full screen with direct scan-out (60 fps, vsync). |
+| Games | A game kit adds DXVK (D3D8/9/10/11) and vkd3d-proton (D3D12, still offered) next to a game's exe, automatically within seconds of the game appearing, or from the right-click menu. Tested in a window (162 fps, heavy shader) and full screen with direct scan-out (60 fps, vsync). Older games: DXVK's D3D8/D3D9 offer 16-bit display modes on top of the 32-bit ones (a small patch, below), and DirectPlay is enabled at install; tested with a 2001 Direct3D 8 game from Steam at 60 Hz (640×480, scaled to the screen; see the 120 Hz note below). |
 | GPU memory | 4 GiB of the console's 16 GiB is set aside for the GPU (3 GiB in 1.1), shared by every program. Windows gets about 9.9 GiB of RAM. Windows' own "dedicated video memory" figure (DXGI) still shows 176 MiB; games that size themselves by that number don't see the extra memory. |
 | GPU robustness | A program that dies mid-frame can't stall the GPU for everyone. A watchdog restarts a hung GPU without restarting Windows. |
 | Restart | Start → Restart comes straight back into Windows without leaving our firmware: no loader, nothing to start again. A blue screen restarts by itself the same way. Up to 20 restarts in a row; after that, after five failed starts in a row, or after Shut down, you start the PS5 Linux loader again as usual. To switch it off, double-click `C:\ps5\gpu\warm-restart-off.cmd` (no admin prompt; `warm-restart-on.cmd` undoes it). |
@@ -50,8 +51,9 @@ Enterprise LTSC 2021.
 
 ## What doesn't work (yet)
 
-- **Tested screens:** 1920×1080 and 2560×1440, at 60 Hz. 120 Hz isn't in this release yet.
-- **One resolution per boot.** Windows runs at the resolution chosen at start (the screen's preferred one, or `mode=` in `ps5win-display.txt`); it can't be changed from Windows' display settings. Games that ask for a lower full-screen mode get none.
+- **Tested screens:** 1920×1080 and 2560×1440, at 60 and 120 Hz.
+- **Some older games crash at start at 120 Hz** (seen with a 2001 Direct3D 8 game; suspected cause: it doesn't expect a 120 Hz screen). If you play older games without community fixes, we recommend 60 Hz: put the line `max_hz=60` in `ps5win-display.txt` on PS5ISO and start Windows again. A fix is planned.
+- **One screen mode per boot.** The screen itself stays at the mode chosen at start (the screen's preferred resolution, or `mode=` in `ps5win-display.txt`). Lower resolutions picked in Windows' display settings or by a game are scaled onto it (centred, black bars where the aspect ratio differs), as with GPU scaling on a PC.
 - **Launch-model PS5 only.** Tested on the original (launch) PS5. The PS5 Slim is untested (reports welcome); the PS5 Pro is not supported.
 - **USB drive only; no M.2 install.** Windows and its launcher live on the USB drive you write the image to. Installing to an M.2 SSD in the PS5's expansion slot isn't supported: the PS5 formats that drive with its own layout (partitions start in the middle of the disk), which neither our firmware nor Windows can boot from yet. Don't run the ps5-linux `m2_init` / `m2_install.sh` tools with this image; they only move the Linux part and Windows would still need the USB drive.
 - **4K is untested.** The PS5 Linux kernel only offers Sony's standard HDMI modes (1080p60, 1080p120, 1440p, 4K60 in full RGB). A screen that offers 4K only at 30 Hz or only in 4:2:0 (common on capture cards) gets 1080p or 1440p instead.
@@ -116,13 +118,13 @@ Enterprise LTSC 2021.
 
 ## Download
 
-Download `ps5-windows-installer.img.xz` (390 MB, 20.5 GiB once unpacked) from this repository's **Releases** page;
+Download `ps5-windows-installer.img.xz` (377 MB, 20.5 GiB once unpacked) from this repository's **Releases** page;
 the release date is shown there. Check its SHA-256 before writing it:
 
 | File | SHA-256 |
 |---|---|
-| `ps5-windows-installer.img.xz` | `c7859fdd9aba4e3b90de4bb3c5d05ad0c22ff7f46151a23c937a6a5678e738ec` |
-| `ps5-windows-installer.img` (inside) | `e239f22064bb166c0e69750a6c07be96b8f113958f6faac5c3819f747632cd6c` |
+| `ps5-windows-installer.img.xz` | `1f55cf0128f40049a5d6011319339a6d29a262431de7de4d012a0b3d994418eb` |
+| `ps5-windows-installer.img` (inside) | `e593ce86c4c79b8c040e444b3f9607f379dd0e91b51bfde9704314ad1938391e` |
 
 The release files are signed with [minisign](https://jedisct1.github.io/minisign/). Our public key (also in
 `release/ps5win.pub`):
@@ -257,7 +259,8 @@ Drivers must be test-signed with a code-signing certificate of your own (`ps5gpu
 | GPU kernel shim and tools | `ps5gpu/build.sh` (mingw-w64): `ps5gpu.sys`, `ps5gpu.exe`, `ps5gpu2.exe` |
 | Display driver | `ps5gpu/wddm/build.sh` (clang-cl + lld-link against Microsoft's WDK headers from NuGet in `build/wdk`). The catalog is made on Windows with PowerShell's `New-FileCatalog` over the `.sys` and `.inf`, then signed with `osslsigncode`. |
 | Ethernet driver | `cleanroom/p5eth-mit/build.sh` |
-| Mesa (RADV, Zink, D3D10 driver) | Mesa 26.3.1 plus `ps5gpu/mesa/mesa-ps5.patch`, configured with `ps5gpu/mesa/configure.sh` and `mingw-cross.txt` (meson cross build with mingw-w64) |
+| Mesa (RADV, Zink, D3D10 driver) | Mesa 26.3.1 plus `ps5gpu/mesa/mesa-ps5.patch`, configured with `ps5gpu/mesa/configure.sh` and `mingw-cross.txt` (meson cross build with mingw-w64); 32-bit OpenGL: the Zink options with `mingw-cross32.txt`, `-msse2 -mfpmath=sse` and `-Dzlib=disabled` |
+| DXVK `d3d8`/`d3d9` | `ps5gpu/dxvk/README.md` (v3.1.1 plus one patch, meson cross build with mingw-w64) |
 | UEFI firmware | EDK2 `edk2-stable202505` with ps5-hackintosh's UEFI package: `firmware/compile.sh` (EDK2 build in Docker), `firmware/make_bundle.py` (memory map and ACPI tables; needs your own console's ACPI tables, kept out of the repository), `firmware/build_stage.sh` (stage 1, from ps5-hackintosh's bring-up code and the PS5 kernel), `firmware/pack_package.sh` (the launch package) |
 | Windows payload | `installer/build_payload.py <out> --frozen installer/payload/freeze-2026-11-23-r13.json` refuses any file whose hash differs from the release's |
 | Installer tree and tests | `installer/make_image_tree.py <out> --package <launch package> --frozen <freeze>`; `installer/tests/run_tests.sh` |
@@ -280,7 +283,7 @@ our patches are linked here.
 | [ps5-hackintosh](https://github.com/rodri0x/ps5-hackintosh) (rodri0x) | MIT | launch package: stage stub in `windows.bzImage`, UEFI payload build base | upstream repository; licence in `release/licenses/` |
 | Mesa (RADV, Zink, d3d10umd) | MIT | Windows driver payload | Mesa 26.3.1 (fec8830e); our changes: `ps5gpu/mesa/mesa-ps5.patch` and `ps5gpu/mesa/mesa-ps5-dx12.patch` (the full diff the shipped D3D10 driver is built from, incl. the WDDM 2.0 picture path) |
 | mingw-w64 14.0.0 winpthreads (`libwinpthread-1.dll`, needed by the Vulkan and OpenGL drivers) | MIT and BSD-3-Clause (winpthreads); ZPL-2.1 (mingw-w64 runtime) | Windows driver payload | unmodified toolchain DLL; [mingw-w64 v14.0.0 source](https://sourceforge.net/projects/mingw-w64/files/mingw-w64/mingw-w64-release/), licences in `release/licenses/` |
-| DXVK 3.1.1 | zlib | game kit | unmodified upstream release (DLLs byte-identical); [v3.1.1 source](https://github.com/doitsujin/dxvk/tree/v3.1.1), licence in `release/licenses/` |
+| DXVK 3.1.1 | zlib | game kit | upstream release; `d3d8.dll` and `d3d9.dll` built from [v3.1.1](https://github.com/doitsujin/dxvk/tree/v3.1.1) with `ps5gpu/dxvk/0001-d3d9-16bpp-modes-on-32bpp-displays.patch` (16-bit display modes for old games), the other DLLs byte-identical; licence in `release/licenses/` |
 | vkd3d-proton 3.1 + our patch 0001 (dxil-spirv: UDiv/UMod helpers) | LGPL-2.1-or-later | native Direct3D 12 driver (`ps5vkd3d.dll` = its d3d12core.dll) | built from the v3.1 source with `0001-dxil-spirv-dxbc-udiv-scalar-helper.patch`; the source tarball and the patch are attached to the release |
 | vkd3d-proton 3.1 | LGPL-2.1-or-later | game kit | unmodified upstream release (DLLs byte-identical); [v3.1 source](https://github.com/HansKristian-Work/vkd3d-proton/tree/v3.1) (a source tarball with all submodules is attached to the release), COPYING/AUTHORS in `release/licenses/` |
 

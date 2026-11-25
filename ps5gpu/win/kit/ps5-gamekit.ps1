@@ -126,7 +126,9 @@ function Get-Need([string]$exe, $pe) {
     $st = Get-PeInfo $exe -Strings
     if ($st -and ($st.Strings | Where-Object { $D3dNames -contains $_ })) { $need = 'd3d' } elseif ($st -and $st.Strings -contains 'ddraw.dll') { $need = 'ddraw' }
   }
-  if ($need -eq 'd3d' -and $all -contains 'ddraw.dll') { $need = 'ddraw' }
+  # ddraw + Direct3D: a DirectDraw game only when the program itself imports no Direct3D 8+ DLL (DX8/9 games
+  # often import ddraw.dll for queries only; they need DXVK alone).
+  if ($need -eq 'd3d' -and $all -contains 'ddraw.dll' -and -not (@($pe.Imports) | Where-Object { $D3dNames -contains $_ })) { $need = 'ddraw' }
   return $need
 }
 
@@ -170,18 +172,33 @@ function Install-Kit([string]$exe, $pe, [string]$need) {
   return @('kit', $msg)
 }
 
-function Remove-Kit([string]$p) {
+# -NoSkip: do not add the folders to skip.txt (the anti-cheat clean-up; the scan skips those games anyway).
+# A file that cannot be deleted (the game is running) stays listed in the marker, so a later -Remove finishes the job.
+function Remove-Kit([string]$p, [switch]$NoSkip) {
   $dirs = if (Test-Path $p -PathType Leaf) { @(Split-Path $p -Parent) } else { @(Get-ChildItem -Path $p -Recurse -Filter $Marker -ErrorAction SilentlyContinue | ForEach-Object { $_.DirectoryName }) }
-  $out = @(); $skip = Read-Skip
+  $out = @(); $skip = @(Read-Skip)        # @(): one entry comes back as a plain string, and += would glue the next one to it
   foreach ($d in $dirs) {
     $m = Join-Path $d $Marker
     if (Test-Path $m) {
-      foreach ($l in Get-Content $m) { if ($l -match '^file (.+)$') { Remove-Item (Join-Path $d $matches[1]) -Force -ErrorAction SilentlyContinue } }
-      Remove-Item $m -Force; Log "kit removed from $d"; $out += "removed from $d"
+      $left = @()
+      foreach ($l in Get-Content $m) {
+        if ($l -match '^file (.+)$') {
+          $f = Join-Path $d $matches[1]
+          Remove-Item $f -Force -ErrorAction SilentlyContinue
+          if (Test-Path $f) { $left += $matches[1] }
+        }
+      }
+      if ($left) {
+        try { Set-Content -Path $m -Value (@("PS5 GPU kit: removal not finished $(Get-Date -Format s), still in use:") + @($left | ForEach-Object { "file $_" })) } catch {}
+        Log "kit removal in $d incomplete, in use: $($left -join ', ')"
+        $out += "NOT finished in $d : $($left -join ', ') in use (close the game, then remove again)"
+      } else {
+        Remove-Item $m -Force; Log "kit removed from $d"; $out += "removed from $d"
+      }
     }
-    $skip += $d.ToLower()
+    if (-not $NoSkip) { $skip += $d.ToLower() }
   }
-  Write-Skip $skip
+  if (-not $NoSkip) { Write-Skip $skip }
   if (-not $out) { $out = @("no kit found in $p") }
   return $out
 }
@@ -217,7 +234,7 @@ function Process-Tree([string]$root, $state, [string]$kitver, [switch]$Explicit)
     if ($ac) {
       Log "skipped, anti-cheat ($ac): $($x.FullName)"; $state[$key] = $stamp
       $undo = ''
-      if (Test-Path (Join-Path $x.DirectoryName $Marker)) { [void](Remove-Kit $x.FullName); $undo = ' The kit files an earlier version placed here were removed.' }
+      if (Test-Path (Join-Path $x.DirectoryName $Marker)) { [void](Remove-Kit $x.FullName -NoSkip); $undo = ' The kit files an earlier version placed here were removed.' }
       $done += "$($x.Name): skipped. This game uses $ac anti-cheat; changed Direct3D DLLs can get your online account banned, so the kit leaves it alone.$undo"
       continue
     }
@@ -254,7 +271,7 @@ function Say([string]$text) {
 if (-not (Test-Path $Home5)) { New-Item -ItemType Directory -Path $Home5 | Out-Null }
 if ($Remove) {
   if (-not $Path) { 'usage: -Path <exe|dir> -Remove'; exit 2 }
-  Say (((Remove-Kit $Path) -join "`n") + "`n(the automatic scan will leave this folder alone now)"); exit 0
+  Say (((Remove-Kit $Path) -join "`n") + "`n(the automatic scan leaves this folder alone now; right-click > Prepare for PS5 GPU puts the kit back and lets the scan in again)"); exit 0
 }
 $state = Read-State; $kitver = Kit-Version
 if ($Path) {
