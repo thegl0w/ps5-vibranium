@@ -89,14 +89,20 @@ Enterprise LTSC 2021.
   | Windows | 10 IoT Enterprise LTSC 2021, x64, build 19044.1288 (ntoskrnl 10.0.19041.1288) |
 
   Check yours with `shasum -a 256 <file>` (macOS/Linux) or `Get-FileHash <file>` (Windows). The installer checks the
-  edition and kernel build before writing anything, and refuses anything else with a message. **Only this ISO is
-  reported as working.** Other editions and languages of the same build (19044.1288) are planned but untested.
-- **Experimental: Windows 10 22H2 and other Windows 10 2004–22H2 media** (for example Microsoft's own Windows 10 22H2
-  ISO, Pro by default). Put `experimental=yes` in `ps5win-answers.txt`; `edition=` picks another edition. The firmware
-  patches these kernels by pattern instead of a per-build patch; the installer and the launcher check that the pattern
-  fits before anything is written or started. Tested once on a console (Microsoft's Windows 10 22H2 English ISO, Pro:
-  install, desktop, GPU driver in full mode). Windows setup may briefly show its own screens ("some important setup",
-  the network step) and moves on by itself: don't click anything. At sign-in Pro may show "keep the USB drive plugged
+  edition and kernel build before writing anything, and refuses anything else with a message. This is the version
+  ps5win is developed and tested on day to day. Other editions and languages of the same build (19044.1288) are
+  planned but untested.
+- **Or: Windows 10 22H2, the free download from Microsoft** (also other Windows 10 2004–22H2 media; Pro by default).
+  **It works:** installed on a console from Microsoft's own Windows 10 22H2 English ISO (Pro), reached the desktop
+  with the GPU driver in full mode at 60 Hz and a clean Device Manager. It isn't the version I develop on, so it gets
+  less testing: a new feature is proven on LTSC 2021 first. To be clear about what that means today: that 22H2 test
+  ran on an image before 1.2, so 1.2's warm Restart (back into Windows without the jailbreak) and the 4 GiB GPU
+  memory split have **not been tested on 22H2 yet**. They should behave the same (same driver, same firmware), and
+  I'll test them on 22H2 next; until then, if Restart misbehaves on 22H2, turn the console off and launch again. To use it, put
+  `experimental=yes` in `ps5win-answers.txt` (the installer asks for this line so nobody ends up on it by accident);
+  `edition=` picks another edition. The firmware patches these kernels by pattern instead of a per-build patch; the
+  installer and the launcher check that the pattern fits before anything is written or started. Windows setup may
+  briefly show its own screens ("some important setup", the network step) and moves on by itself: don't click anything. At sign-in Pro may show "keep the USB drive plugged
   in" (a Windows To Go notice); close it. Home and N editions are refused, Windows
   Update stays off, and activation needs your own licence (without `product_key=` the installer uses Microsoft's public
   KMS client setup key for the edition, which does not activate Windows).
