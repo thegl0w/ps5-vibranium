@@ -78,6 +78,33 @@ namespace be
         uint64_t now = ((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime, up = GetTickCount64() * 10000ull;
         return ((now - up + 80000000ull) / 160000000ull) + 1;
     }
+    uint64_t sessionId(bool create)
+    {
+        // HKLM\SYSTEM\...\Services\ps5gpu\Session (volatile: Windows drops it at every restart), value RunId. SYSTEM
+        // is not redirected for 32-bit programs. Cached once known: only `run` makes it, once per Windows start.
+        static uint64_t cached;
+        if (cached) return cached;
+        const char* path = "SYSTEM\\CurrentControlSet\\Services\\ps5gpu\\Session";
+        uint64_t id = 0;
+        DWORD bytes = sizeof id;
+        if (RegGetValueA(HKEY_LOCAL_MACHINE, path, "RunId", RRF_RT_REG_QWORD, NULL, &id, &bytes) == ERROR_SUCCESS && id) return cached = id;
+        if (!create) return 0;
+        HKEY k;
+        if (RegCreateKeyExA(HKEY_LOCAL_MACHINE, path, 0, NULL, REG_OPTION_VOLATILE, KEY_READ | KEY_WRITE | KEY_WOW64_64KEY, NULL, &k, NULL) != ERROR_SUCCESS) return 0;
+        LARGE_INTEGER qpc;
+        QueryPerformanceCounter(&qpc);
+        FILETIME ft;
+        GetSystemTimeAsFileTime(&ft);
+        uint64_t x = (uint64_t)qpc.QuadPart ^ (((uint64_t)ft.dwHighDateTime << 32) | ft.dwLowDateTime) ^ ((uint64_t)GetCurrentProcessId() << 40);
+        x += 0x9E3779B97F4A7C15ull;                              // splitmix64 finaliser
+        x = (x ^ (x >> 30)) * 0xBF58476D1CE4E5B9ull;
+        x = (x ^ (x >> 27)) * 0x94D049BB133111EBull;
+        x ^= x >> 31;
+        if (!x) x = 1;
+        bool ok = RegSetValueExA(k, "RunId", 0, REG_QWORD, (const BYTE*)&x, sizeof x) == ERROR_SUCCESS;
+        RegCloseKey(k);
+        return ok ? (cached = x) : 0;
+    }
     bool isCompositor()
     {
         char exe[MAX_PATH] = "";

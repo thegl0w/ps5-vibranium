@@ -55,6 +55,26 @@ namespace
     static_assert(sizeof(State) <= kAreaBytes - kStateOff, "state does not fit behind the area");
     static_assert(kUserOff + kUserBytes <= kStateOff, "state overlaps the step-8 memory");
 
+    // Which Windows start the client table belongs to. A warm Restart keeps VRAM, so the table of the Windows before is
+    // still there and valid-looking; its pids mean nothing now, and Windows starts its programs in the same order every
+    // time, so the same numbers are often running again (2026-11-25: the old compositor's pid was this start's dwm ->
+    // `ps5gpu2 run` refused, the watchdog's recovery ended that program). `run` writes this record with the session id
+    // (be::sessionId: volatile registry, gone after any restart). No record = a tool from before it: trust the pids.
+    const uint64_t kRunRecOff = 0xFF0000;
+    const uint32_t kRunRecMagic = 0x52523550;            // "P5RR"
+    struct RunRec { uint32_t magic, pad; uint64_t session; };
+    static_assert(kStateOff + sizeof(State) <= kRunRecOff, "state overlaps the run record");
+    static_assert(kRunRecOff + sizeof(RunRec) <= kAreaBytes, "run record outside the area");
+
+    // false: the table (clients, their memory) is from an earlier Windows start; every client in it is gone.
+    bool tableCurrent(const uint8_t* area)
+    {
+        const RunRec* r = (const RunRec*)(area + kRunRecOff);
+        if (r->magic != kRunRecMagic) return true;
+        uint64_t id = be::sessionId(false);
+        return id != 0 && id == r->session;
+    }
+
     struct Lock {
         Lock() { be::lock(); }
         ~Lock() { be::unlock(); }
@@ -372,8 +392,9 @@ namespace
     void reap(p5_dev* d)
     {
         State* s = d->st;
+        bool current = tableCurrent(d->area);
         for (uint32_t v = 1; v < 16; ++v) {
-            if (s->cl[v].state == kLive && !be::pidAlive(s->cl[v].pid)) detach(d, v);
+            if (s->cl[v].state == kLive && (!current || !be::pidAlive(s->cl[v].pid))) detach(d, v);
             if (s->cl[v].state == kZombie && *d->fence >= s->cl[v].lastSeq) release(d, v);
         }
     }
@@ -601,6 +622,7 @@ int p5_open(p5_dev** out)
             uint32_t me = R(d, GC(mmCP_ME_CNTL));
             if (d->failed) r = -EIO;
             else if (d->shared->magic != kSharedMagic || (me & (CP_ME_CNTL__ME_HALT_MASK | CP_ME_CNTL__PFP_HALT_MASK | CP_ME_CNTL__CE_HALT_MASK))) r = -ENXIO;
+            else if (!tableCurrent(d->area)) r = -ENXIO;     // the ring of the Windows before a warm Restart: not started yet
             State* s = d->st;
             if (!r) scanReclaim(d->area);                // before the heap is laid out around the scan-out image
             if (!r && s->magic == kStateMagic) reap(d);
@@ -674,7 +696,7 @@ int p5_clients(void)
     {
         Lock g;
         State* s = (State*)(area + kStateOff);
-        if (((Shared*)(area + kSharedOff))->magic == kSharedMagic && s->magic == kStateMagic)
+        if (((Shared*)(area + kSharedOff))->magic == kSharedMagic && s->magic == kStateMagic && tableCurrent(area))
             for (uint32_t v = 1; v < 16; ++v) n += s->cl[v].state == kLive && be::pidAlive(s->cl[v].pid);
     }
     be::unmap(area);
@@ -708,7 +730,7 @@ int p5_health(uint64_t* seq, uint64_t* fence)
             // own test submissions until the first client attaches (2026-11-21: that read as "stuck").
             Lock g;
             State* st = (State*)(area + kStateOff);
-            if (st->magic == kStateMagic)
+            if (st->magic == kStateMagic && tableCurrent(area))
                 for (uint32_t v = 1; v < 16; ++v)
                     if (st->cl[v].state == kLive && st->cl[v].lastSeq > *fence && be::pidAlive(st->cl[v].pid)) r = 3;
         }
@@ -732,7 +754,7 @@ int p5_client_pids(uint32_t* pids, int max)
     {
         Lock g;
         State* s = (State*)(area + kStateOff);
-        if (((Shared*)(area + kSharedOff))->magic == kSharedMagic && s->magic == kStateMagic)
+        if (((Shared*)(area + kSharedOff))->magic == kSharedMagic && s->magic == kStateMagic && tableCurrent(area))
             for (uint32_t v = 1; v < 16 && n < max; ++v)
                 if (s->cl[v].state == kLive && be::pidAlive(s->cl[v].pid)) pids[n++] = s->cl[v].pid;
     }
@@ -856,7 +878,7 @@ int p5_state_text(char* out, int size)
             for (uint32_t v = 1; v < 16 && n < size - 120; ++v)
                 if (s->cl[v].state != kFree)
                     n += snprintf(out + n, size - n, "client %u: %s pid %u (%s) buffers %u = %llu MiB, page-table pages %u, last seq %llu\n", v,
-                                  s->cl[v].state == kLive ? "live" : "zombie", s->cl[v].pid, be::pidAlive(s->cl[v].pid) ? "running" : "gone", s->cl[v].bos,
+                                  s->cl[v].state == kLive ? "live" : "zombie", s->cl[v].pid, !tableCurrent(area) ? "earlier Windows start" : be::pidAlive(s->cl[v].pid) ? "running" : "gone", s->cl[v].bos,
                                   (unsigned long long)(perClient[v] >> 20), s->cl[v].ptPages, (unsigned long long)s->cl[v].lastSeq);
         }
     }
@@ -950,6 +972,37 @@ int p5_scanout_snapshot(const char* path)
     }
     be::unmap((void*)px);
     return r;
+}
+
+int p5_run_begin(void)
+{
+    if (!be::open()) return -ENODEV;
+    uint32_t fbTop = 0, fbBase = 0, fbOffset = 0;
+    if (!be::rd(GC(mmGCMC_VM_FB_LOCATION_BASE), fbBase) || !be::rd(GC(mmGCMC_VM_FB_LOCATION_TOP), fbTop) || !be::rd(GC(mmGCMC_VM_FB_OFFSET), fbOffset)) return -EIO;
+    uint64_t mcBase = (uint64_t)(fbBase & 0xFFFFFF) << 24, vram = (((uint64_t)(fbTop & 0xFFFFFF) << 24) | 0xFFFFFF) - mcBase + 1;
+    uint64_t carve = (uint64_t)fbOffset << 24;
+    if (carve < 0x100000000ull || vram < 0x80000000ull || vram > 0x400000000ull) return -ENODEV;
+    uint64_t id = be::sessionId(true);
+    if (!id) return -EACCES;
+    uint8_t* area = (uint8_t*)be::map(carve + vram - kAreaBelowTop, kAreaBytes, true);
+    if (!area) return -ENOMEM;
+    {
+        Lock g;
+        // Every client of the old ring is gone (run refuses while one is running): empty the table so that the first
+        // program to attach rebuilds the heap, whatever library version it carries (older ones only check pids).
+        State* s = (State*)(area + kStateOff);
+        if (s->magic == kStateMagic) {
+            for (uint32_t v = 1; v < 16; ++v) s->cl[v].state = kFree;
+            s->live = 0;
+        }
+        RunRec* r = (RunRec*)(area + kRunRecOff);
+        r->session = id;
+        r->pad = 0;
+        r->magic = kRunRecMagic;
+        be::flushWrites();
+    }
+    be::unmap(area);
+    return 0;
 }
 
 int p5_housekeeping(void)

@@ -189,6 +189,20 @@ Ps5WarmInit (
     }
   }
 
+  //
+  // A carve-out base that is not 1 GiB-aligned (5 GiB: 0x330000000) shares its 1 GiB with RAM, including the record at
+  // 12 GiB + 0xF0000. Map that 1 GiB in 2 MiB pages: write-back below the carve-out, uncached from it on. (A UC record
+  // page followed by the WBINVD before stage 1 could write stale cached lines over what the stub stored.)
+  //
+  if (((R64 (Rec, REC_CARVE) & 0x3FFFFFFFULL) != 0) && (CarveLo >= 4) && (CarveLo < 512)) {
+    Pd = (UINT64 *)(Blk + BLK_PDC);
+    for (I = 0; I < 512; I++) {
+      UINT64  A = (CarveLo << 30) | (I << 21);
+      Pd[I] = A | 0x83 | ((A >= R64 (Rec, REC_CARVE)) ? 0x18 : 0);
+    }
+    Pdpt[CarveLo] = (B + BLK_PDC) | 3;
+  }
+
   CopyMem (Blk + BLK_BLOB, Ps5WarmBlob, BlobSize);
   //
   // What stage 1 found and did to the PCI state on a warm run (zero after a launch from Linux): kept in the block,

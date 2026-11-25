@@ -11,9 +11,16 @@ out = here.parent / "build"
 repo = here.parents[1]
 mac = repo / "ps5-hackintosh"
 acpi = repo / "console-13.60/dump/acpi"
-# This base was checked against /proc/iomem for this hardware session.
-if os.environ.get("CARVE_BASE") != "0x370000000":
-    sys.exit("Confirm the live 4 GiB carve-out before building.")
+# The carve-out base must match the loader's vram.txt on the target drive: 0x370000000 = 4 GiB (releases up to 1.1),
+# 0x330000000 = 5 GiB (release 1.2 on). The firmware (prepare.py -> Ps5WarmConfig.h PS5_CARVE_BASE, used
+# by windows_bds.inc's map check) must have been compiled for the same base: checked below.
+CARVES = {"0x370000000": "4 GiB", "0x330000000": "5 GiB"}
+if os.environ.get("CARVE_BASE") not in CARVES:
+    sys.exit("CARVE_BASE must be one of " + ", ".join(CARVES) + " (the live carve-out of the target drive).")
+_cfg = (out / "edk2/UefiPayloadPkg/Library/PlatformBootManagerLib/Ps5WarmConfig.h").read_text()
+if f"#define PS5_CARVE_BASE {os.environ['CARVE_BASE']}ULL" not in _cfg:
+    sys.exit("The compiled firmware's PS5_CARVE_BASE differs from CARVE_BASE: rerun firmware/compile.sh with this CARVE_BASE.")
+print("make_bundle: carve-out", CARVES[os.environ["CARVE_BASE"]], "at", os.environ["CARVE_BASE"])
 os.environ.update(MIRROR="0", USBFIX="0")
 base = 0x6eff0000
 arena = bytearray()

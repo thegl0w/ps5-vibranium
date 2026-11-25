@@ -133,6 +133,7 @@ echo "== write path (simulated system)"
 check "writer: order, re-checks, stops"     0 "10 writer scenarios passed" -- $PY tests/writer_test.py
 check "answer file: password blanked"     0 "10 answer-file cases passed" -- $PY tests/answers_test.py
 check "editions + pattern stub checks"    0 "edition/pattern cases passed" -- $PY tests/edition_test.py
+check "VRAM carve-out from the package"    0 "6 carve cases passed" -- $PY tests/carve_test.py
 
 echo "== payload (C:\\ps5 tree from this Mac's build outputs)"
 if [ -f ../build/ps5gpu/wddm/ps5wddm.sys ]; then

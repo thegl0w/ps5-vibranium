@@ -4,7 +4,9 @@ rem Needs administrator rights. Output in C:\ps5\gpu\start.log. Not run automati
 rem (scheduled task "ps5-gpu-start"), so a bad GPU start can never repeat by itself at every logon.
 setlocal enabledelayedexpansion
 cd /d C:\ps5\gpu
-echo ==== %date% %time% > start.log
+rem The log is appended to (a failed start stays readable after a later one); past 256 KiB it moves to start.prev.log.
+if exist start.log for %%s in (start.log) do if %%~zs gtr 262144 move /y start.log start.prev.log >nul
+echo ==== %date% %time% >> start.log
 ps5gpu.exe load C:\ps5\gpu\ps5gpu.sys >> start.log 2>&1
 echo load EXIT=!errorlevel!>> start.log
 ps5gpu2.exe run C:\ps5\gpu\fw >> start.log 2>&1

@@ -82,6 +82,27 @@ def sha256(path):
 
 # ---- steps --------------------------------------------------------------------------------------------------------
 
+# The VRAM carve-out the launch package was built for (its run_stage.sh checks /proc/iomem for it): 370000000 = 4 GiB
+# (vram.txt 0x100000000), 330000000 = 5 GiB (vram.txt 0x140000000). The firmware in the package has the same base
+# compiled in, so the console's vram.txt must match the package, never the other way round.
+PACKAGE = Path(os.environ.get("PS5WIN_PACKAGE", HERE.parent / "package" / "deploy.tgz"))
+CARVES = ("370000000", "330000000")
+
+
+def expected_carve(package=None):
+    import re
+    import tarfile
+    package = Path(package or PACKAGE)
+    if not package.exists():
+        return CARVES[0]
+    with tarfile.open(package) as t:
+        text = t.extractfile("run_stage.sh").read().decode()
+    m = re.findall(r"\^([0-9a-f]+)-46fffffff : Reserved\$", text)
+    if len(m) != 1 or m[0] not in CARVES:
+        raise SystemExit(f"launch package {package}: no single known VRAM carve-out check in run_stage.sh ({m})")
+    return m[0]
+
+
 def preflight(r, a):
     if sys.platform != "linux":
         r.add("console checks", "SKIP", "not on the PS5 (kernel, crash kernel and VRAM carve-out are checked there)")
@@ -89,8 +110,9 @@ def preflight(r, a):
     probs = []
     if Path("/sys/kernel/kexec_crash_size").exists() and Path("/sys/kernel/kexec_crash_size").read_text().strip() == "0":
         probs.append("no crash kernel memory (crashkernel=)")
-    if "370000000-46fffffff : Reserved" not in Path("/proc/iomem").read_text():
-        probs.append("VRAM carve-out 370000000-46fffffff not reserved")
+    carve = expected_carve()
+    if f"{carve}-46fffffff : Reserved" not in Path("/proc/iomem").read_text():
+        probs.append(f"VRAM carve-out {carve}-46fffffff not reserved (vram.txt does not match the launch package)")
     r.add("console checks", "FAIL" if probs else "OK", "; ".join(probs))
 
 

@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MIT
-#include "Ps5WarmConfig.h"     // PS5_WARM_ENABLED, PS5_DEV_DISKS (written by firmware/prepare.py)
+#include "Ps5WarmConfig.h"     // PS5_WARM_ENABLED, PS5_DEV_DISKS, PS5_CARVE_BASE (written by firmware/prepare.py)
+#ifndef PS5_CARVE_BASE
+#define PS5_CARVE_BASE 0x370000000ULL   // 4 GiB carve-out
+#endif
 #include <Guid/Acpi.h>
 #include <IndustryStandard/Acpi.h>
 #include <Protocol/UsbIo.h>
@@ -25,7 +28,7 @@ STATIC BOOLEAN WindowsMapSafe (VOID)
     EFI_MEMORY_DESCRIPTOR *D = (EFI_MEMORY_DESCRIPTOR *)((UINT8 *)Map + I * Stride);
     UINT64 Lo = D->PhysicalStart, Hi = Lo + EFI_PAGES_TO_SIZE (D->NumberOfPages);
     if ((Lo < 0x6f600000 && Hi > 0x6f000000) || (Lo < 0x70600000 && Hi > 0x70000000) ||
-        (Lo < 0x470000000ULL && Hi > 0x370000000ULL)) {
+        (Lo < 0x470000000ULL && Hi > PS5_CARVE_BASE)) {
       if (D->Type != EfiReservedMemoryType && D->Type != EfiMemoryMappedIO) Ok = FALSE;
     }
   }

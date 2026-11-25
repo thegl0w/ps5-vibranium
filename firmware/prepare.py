@@ -140,9 +140,16 @@ else:
 _warm = "#define PS5_WARM_ENABLED %d\n" % (1 if os.environ.get("PS5WARM") == "1" else 0)
 (lib / "Ps5WarmConfig.h").write_text(_warm)
 (tree / "UefiPayloadPkg/Library/PlatformBootManagerLib/Ps5WarmConfig.h").write_text(_warm)
+# VRAM carve-out base the BDS map check protects (windows_bds.inc); must equal make_bundle.py's CARVE_BASE (it checks).
+# Default 4 GiB (releases up to 1.1). 0x330000000 = 5 GiB (release 1.2 on).
+_carve = os.environ.get("CARVE_BASE", "0x370000000")
+if _carve not in ("0x370000000", "0x330000000"):
+    raise SystemExit("prepare: CARVE_BASE must be 0x370000000 or 0x330000000")
+print("prepare: carve-out base", _carve)
 # Development disk identities (partition GUIDs of the dev Sabrent / old Toshiba) only in dev builds: PS5DEV=1.
 (tree / "UefiPayloadPkg/Library/PlatformBootManagerLib/Ps5WarmConfig.h").write_text(
-    _warm + "#define PS5_DEV_DISKS %d\n" % (1 if os.environ.get("PS5DEV") == "1" else 0))
+    _warm + "#define PS5_DEV_DISKS %d\n" % (1 if os.environ.get("PS5DEV") == "1" else 0)
+    + "#define PS5_CARVE_BASE %sULL\n" % _carve)
 _dev = tree / "UefiPayloadPkg/Library/PlatformBootManagerLib/WindowsDevDisks.h"
 _dev.write_text((here / "dev_disks.inc").read_text() if os.environ.get("PS5DEV") == "1" else "// release build: no development disk identities\n")
 print("prepare: dev disk identities", "IN (PS5DEV=1)" if os.environ.get("PS5DEV") == "1" else "out (release)")

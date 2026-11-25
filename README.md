@@ -1,6 +1,11 @@
 # ps5win: Windows 10 on the PlayStation 5, with a GPU driver
 
-> **Beta (1.1).** Expect rough edges, and please report what you find.
+> **Beta (1.2).** Expect rough edges, and please report what you find.
+>
+> **Don't rely on it for important work.** ps5win moves faster than we can test every combination, so releases ship
+> what works on our console rather than waiting until every part is finished and checked. Don't use it for anything
+> valuable, anything that has to be stable, or anything that can't be interrupted: keep your files backed up
+> elsewhere and expect the odd hang, blue screen or restart.
 
 > **Photosensitivity warning.** GPU-accelerated browsers (Edge with acceleration on) can flash the screen bright
 > white many times in a row on this driver. The installer turns Edge's acceleration off; keep it off.
@@ -37,9 +42,10 @@ Enterprise LTSC 2021.
 | Direct3D 10/11 (system) | Mesa's D3D10 user-mode driver on Zink on RADV. Runs the desktop and ordinary programs. |
 | Direct3D 12 (system) | Native: Windows' own Direct3D 12 runs on our driver (`ps5d3d12`, built on vkd3d-proton), 64-bit and 32-bit, no files next to the game; tested with Microsoft's Direct3D 12 samples, Unreal Engine 4 games (in game at the kit's frame rate) and Godot 4. To go back to WDDM 1.3 (as in 1.0): double-click `C:\ps5\gpu\dx12-native-off.cmd` (no admin prompt needed) and restart; `dx12-native-on.cmd` undoes it. |
 | Games | A game kit adds DXVK (D3D9/10/11) and vkd3d-proton (D3D12, still offered) next to a game's exe, automatically within seconds of the game appearing, or from the right-click menu. Tested in a window (162 fps, heavy shader) and full screen with direct scan-out (60 fps, vsync). |
+| GPU memory | 4 GiB of the console's 16 GiB is set aside for the GPU (3 GiB in 1.1), shared by every program. Windows gets about 9.9 GiB of RAM. Windows' own "dedicated video memory" figure (DXGI) still shows 176 MiB; games that size themselves by that number don't see the extra memory. |
 | GPU robustness | A program that dies mid-frame can't stall the GPU for everyone. A watchdog restarts a hung GPU without restarting Windows. |
 | Restart | Start → Restart comes straight back into Windows without leaving our firmware: no loader, nothing to start again. A blue screen restarts by itself the same way. Up to 20 restarts in a row; after that, after five failed starts in a row, or after Shut down, you start the PS5 Linux loader again as usual. To switch it off, double-click `C:\ps5\gpu\warm-restart-off.cmd` (no admin prompt; `warm-restart-on.cmd` undoes it). |
-| Network | Ethernet, with our own driver (`p5eth.sys`), gets its address by DHCP (tested: lease in about a second after an adapter restart, full renew in under 4 s). It needs a DHCP server on the other end (a router, or a computer sharing its connection). Connect the cable before starting; hot-plug comes later. A USB network adapter is the alternative. |
+| Network | Ethernet, with our own driver (`p5eth.sys`), gets its address by DHCP (tested: lease in about a second after an adapter restart, full renew in under 4 s). It needs a DHCP server on the other end (a router, or a computer sharing its connection). Connect the cable before starting. Unplugging and replugging it while Windows runs reconnects, but the link may come back at 100 Mbit/s instead of 1 Gbit/s. A USB network adapter is the alternative. |
 | Storage | USB drives. Other USB drives plugged in while Windows runs get a drive letter as usual. The internal NVMe is blocked on purpose (see Safety). |
 
 ## What doesn't work (yet)
@@ -104,8 +110,8 @@ the release date is shown there. Check its SHA-256 before writing it:
 
 | File | SHA-256 |
 |---|---|
-| `ps5-windows-installer.img.xz` | `decc2d185890decb378e684646661cee1708ef6739ffbde443d389912384e5ca` |
-| `ps5-windows-installer.img` (inside) | `4b4a5b2a5fb41ccd8e7231b00173c313c808436e6d8e2b29e9e30c1f8a70882f` |
+| `ps5-windows-installer.img.xz` | `c7859fdd9aba4e3b90de4bb3c5d05ad0c22ff7f46151a23c937a6a5678e738ec` |
+| `ps5-windows-installer.img` (inside) | `e239f22064bb166c0e69750a6c07be96b8f113958f6faac5c3819f747632cd6c` |
 
 The release files are signed with [minisign](https://jedisct1.github.io/minisign/). Our public key (also in
 `release/ps5win.pub`):
@@ -191,8 +197,10 @@ Your Windows here is less locked down than a normal install:
 | Blue screen `INACCESSIBLE_BOOT_DEVICE` (second parameter `C0000034`), Windows freezes at the start, or the Linux loader can't find its files | The console's USB sometimes doesn't bring the drive up in time (an occasional PS5 USB fault). After a Restart, Windows restarts by itself and comes back; you don't need to do anything. If it happens on a start from the loader, or keeps happening: power the console off, unplug the drive and plug it back in, then start again. Always use a port on the console itself, never a hub or dock. |
 | After Start → Restart the screen stays on the boot text, or stays black for more than three minutes | Hold the power button until the console switches off, then start the loader again. If it happens again, double-click `C:\ps5\gpu\warm-restart-off.cmd`: Restart then needs the loader again, as in 1.0. Tell us what the last lines on the screen said. |
 | Stuck in Linux after the install (a blinking cursor), or a `root@ps5win` prompt on tty1 | Linux didn't hand over to Windows this time. Common causes: **the drive was moved to a different USB adapter or enclosure** (the install remembers the drive by the serial number the adapter reports, and won't start Windows from a drive it doesn't recognise: put it back in its original adapter); a key was pressed during the countdown; or the screen wasn't detected (the display cable was moved, or the monitor's HDMI input is asleep: set the input by hand). Power the console off and start the loader again. Nothing is broken. |
+| Garbled text or colours on screen for a moment during Start → Restart | Known and harmless: our firmware's screen output during the warm restart. It clears by itself and Windows starts normally. |
+| A USB drive plugged in while Windows runs never gets a drive letter, and replugging it does nothing | The drive (or its adapter) stopped answering, and Windows waits for it. Restart Windows. That restart can hang for a few minutes and end in a blue screen; it then comes back by itself. Nothing is lost on the drive. |
 | Ethernet is connected but gets no address | Windows asks a DHCP server for its address, like any PC: plug the cable into a router, or, for a direct cable to a Mac, turn on Internet Sharing for that adapter (on Windows: Internet Connection Sharing). |
-| Ethernet says "Network cable unplugged" | Plug the cable in **before** you start the console: the Linux step brings the port up and the Windows driver takes it over. Plugging it in while Windows runs isn't supported yet; restart with the cable in. |
+| Ethernet says "Network cable unplugged" | Plug the cable in **before** you start the console: the Linux step brings the port up and the Windows driver takes it over. If it was never plugged in at the start, restart with the cable in. A cable pulled and replugged while Windows runs reconnects, possibly at 100 Mbit/s. |
 | The console says it "wasn't turned off properly", or shows a storage check / repair screen when it next starts normally | Expected and harmless. Windows (and Linux) power the console off through its power controller directly, so the console's own shutdown never runs. Clearing that note would mean writing to Sony's settings storage, which ps5win never does. |
 
 ## How it works

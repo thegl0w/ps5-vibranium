@@ -184,6 +184,9 @@ namespace be
     bool isCompositor() { return getenv("PS5GPU_MOCK_DWM") != nullptr; }
     uint64_t bootStamp() { return 1; }
     void killPid(uint32_t pid) { gDeadPid = pid; }
+    static uint64_t gSession;
+    uint64_t sessionId(bool create) { if (!gSession && create) gSession = 0x5E55100000000000ull + gLastPid; return gSession; }
+    void newBoot() { gSession = 0; }
 
     bool open()
     {

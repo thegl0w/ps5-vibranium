@@ -1,6 +1,6 @@
 # Per-file origin list
 
-221 files. SHA-256 (first 16 hex digits) of the file as published. "Shared code" = the clone detector's
+222 files. SHA-256 (first 16 hex digits) of the file as published. "Shared code" = the clone detector's
 finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one is explained).
 
 | File | SHA-256 | Origin | Licence | Shared code (clone detector) |
@@ -11,7 +11,7 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `.gitignore` | `c7664b5b36551b63` | ours | MIT | - |
 | `CONTRIBUTING.md` | `4673b86b6ac87a23` | ours | MIT | - |
 | `LICENSE` | `aab31633bff4a0be` | ours (the MIT text of release/LICENSE) | MIT | - |
-| `README.md` | `85192738f1540f19` | ours | MIT | - |
+| `README.md` | `93c5390c83dd5a38` | ours | MIT | - |
 | `SECURITY.md` | `53dcddeedf3ed5b5` | ours | MIT | - |
 | `cleanroom/directload-mit/CyanDirectLoad.cpp` | `1b62e949ae61539f` | clean-room rewrite from cleanroom/spec-directload.md (replaces MetalCyan's CyanDirectLoad) | MIT | MetalCyan:MetalCyan/CyanDirectLoad.cpp (1 runs, longest 4 lines) |
 | `cleanroom/directload-mit/CyanDirectLoad.hpp` | `d2e555f6a333a229` | clean-room rewrite from cleanroom/spec-directload.md (replaces MetalCyan's CyanDirectLoad) | MIT | MetalCyan:MetalCyan/CyanDirectLoad.hpp (24 runs, longest 15 lines) |
@@ -32,26 +32,26 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `cleanroom/spec-icc-reset.md` | `fecf9352a2385604` | clean-room specification (written description; see CLEANROOM.md) | MIT | - |
 | `cleanroom/spec-p5eth.md` | `8b88a5fb0791d8ad` | clean-room specification (written description; see CLEANROOM.md) | MIT | - |
 | `docs/CLEANROOM.md` | `42f2c8d77fa764a3` | ours | MIT | - |
-| `docs/CLONECHECK.md` | `92452921b9d39444` | ours | MIT | - |
-| `docs/FAQ.md` | `3084265037939570` | ours | MIT | - |
-| `docs/ORIGINS.md` | `d4f6bd1d194e6c90` | ours | MIT | - |
+| `docs/CLONECHECK.md` | `f570ae801797eb5e` | ours | MIT | - |
+| `docs/FAQ.md` | `1be7c07bcf4668d1` | ours | MIT | - |
+| `docs/ORIGINS.md` | `4cbabe7fa97cea8d` | ours | MIT | - |
 | `docs/PINNED-ISSUE.md` | `410221b5318e8f3e` | ours | MIT | - |
 | `firmware/build_stage.sh` | `0dc06bdf51500064` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
 | `firmware/compile.sh` | `d0d10d429dcba40a` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
 | `firmware/kms_linear.py` | `2153e4d9152f6017` | derived from ps5-hackintosh bringup/tools/kms_linear.py (rodri0x), credited in its header | MIT | ps5-hackintosh:bringup/tools/kms_linear.py (100 runs, longest 71 lines); ps5-hackintosh:bringup/tools/patch_tripwire.py (7 runs, longest 10 lines) |
 | `firmware/kstub_table.py` | `0b198e3e82d1c753` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
-| `firmware/make_bundle.py` | `b0b2f69d28e602a2` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
+| `firmware/make_bundle.py` | `a26dc0839f1537ea` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
 | `firmware/make_kpat.py` | `72742e77cae3280a` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
 | `firmware/make_kstub.py` | `6c0727282c18a431` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
 | `firmware/pack_package.sh` | `1eac547dbb42ec33` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
-| `firmware/prepare.py` | `4b5cc6c7a7679fef` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
-| `firmware/ps5warm/Ps5Warm.c` | `a31ed20eec415b77` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
-| `firmware/ps5warm/Ps5Warm.h` | `ad3be7d24951a407` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
+| `firmware/prepare.py` | `bb60955db779d511` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
+| `firmware/ps5warm/Ps5Warm.c` | `2700c70105f9651d` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
+| `firmware/ps5warm/Ps5Warm.h` | `ca8329816c684d61` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
 | `firmware/ps5warm/Ps5WarmAsm.S` | `72c2023e4730687a` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
 | `firmware/ps5warm/warm_hand.h` | `548b0966299194c5` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
 | `firmware/ps5warm/warm_pci.h` | `51f2b634f96fd96b` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
 | `firmware/run_stage.sh` | `cc6b1215b314f6ae` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
-| `firmware/windows_bds.inc` | `f63c14eb9629a04d` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
+| `firmware/windows_bds.inc` | `a4668300bf3386af` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
 | `firmware/windows_halpatch.inc` | `3466f556a2956479` | ours (applied to EDK2 / ps5-hackintosh's UEFI build at build time) | MIT | - |
 | `firmware/windows_kpat.inc` | `78e6502ff7887c02` | generated by firmware/make_kpat.py | MIT | - |
 | `firmware/windows_kstub-19041.1288.inc` | `5a7039e50feede6a` | generated by firmware/make_kstub.py (our code, offsets, fingerprints) | MIT | - |
@@ -76,7 +76,7 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `installer/check_kernel.py` | `dfe0bec8d86ccabb` | ours | MIT | - |
 | `installer/deny.txt` | `d9d9b9234b18078e` | ours | MIT | - |
 | `installer/find_iso.py` | `37a5c62d1303b268` | ours | MIT | - |
-| `installer/install.py` | `8dc8eb3c81673e7c` | ours | MIT | - |
+| `installer/install.py` | `ced9e99e85c5e3af` | ours | MIT | - |
 | `installer/lib/bcd.py` | `6ce8caa63704d423` | ours | MIT | - |
 | `installer/lib/catalog.py` | `547fecaa8f03837a` | ours | MIT | - |
 | `installer/lib/hive.py` | `ffe15260ac7fea2b` | ours | MIT | - |
@@ -103,13 +103,14 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `installer/payload/setup/security-report.ps1` | `c84cf21d99323747` | ours | MIT | - |
 | `installer/payload/setup/wu-tasks-off.ps1` | `85392a918cf4c164` | ours | MIT | - |
 | `installer/payload/setup/wu-tasks-system.cmd` | `4f9b67c6d0dc3d0c` | ours | MIT | - |
-| `installer/payload/warm/ps5guard.cmd` | `e3029a1b0d017fac` | ours | MIT | - |
+| `installer/payload/warm/ps5guard.cmd` | `8ed3461db4890168` | ours | MIT | - |
 | `installer/payload/warm/warm-restart-off.cmd` | `6dc5dd7cb9112847` | ours | MIT | - |
 | `installer/payload/warm/warm-restart-on.cmd` | `490039f478eeadee` | ours | MIT | - |
 | `installer/plan_layout.py` | `f1b1772fe1cdbc7f` | ours | MIT | - |
 | `installer/ps5win-answers.example.txt` | `209a1d0839a42e27` | ours | MIT | - |
 | `installer/tests/answers_test.py` | `48f94399f9658ba4` | ours | MIT | - |
 | `installer/tests/bcd_test.py` | `a35f16ae8ccab6f2` | ours | MIT | - |
+| `installer/tests/carve_test.py` | `4680494b649ec957` | ours | MIT | - |
 | `installer/tests/edition_test.py` | `1a7805143707d33a` | ours | MIT | - |
 | `installer/tests/fixtures/answer-ok.txt` | `f007cc4dd251f9d9` | ours | MIT | - |
 | `installer/tests/fixtures/answer-wrong.txt` | `0ffdb90fec0b5e25` | ours | MIT | - |
@@ -128,7 +129,7 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `installer/tests/fixtures/toshiba-noiso.json` | `e883921dd8cdce6e` | ours | MIT | - |
 | `installer/tests/fixtures/two-disk.json` | `78a8b74417db2857` | ours | MIT | - |
 | `installer/tests/overlay_test.py` | `eaf7a28eb48ac24b` | ours | MIT | - |
-| `installer/tests/run_tests.sh` | `c68ed6f26cc40d3f` | ours | MIT | - |
+| `installer/tests/run_tests.sh` | `353eb822041fa283` | ours | MIT | - |
 | `installer/tests/writer_test.py` | `8039ee57d30921af` | ours | MIT | - |
 | `ps5gpu/README.md` | `d95d77d13a363a17` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/build.sh` | `fda837bd02f3a60b` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
@@ -145,8 +146,8 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `ps5gpu/d3d12/vkd3d-patches/README.md` | `bc81dcfffd84ae0c` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/include/ps5gpu_ioctl.h` | `26f83273968c5aab` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/kmd/ps5gpu.c` | `40a9f99959b4d259` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
-| `ps5gpu/lib/ps5drm.cpp` | `76035fb932481b82` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
-| `ps5gpu/lib/ps5drm.h` | `8762674bb217c496` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
+| `ps5gpu/lib/ps5drm.cpp` | `5fc62038d60ec32f` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
+| `ps5gpu/lib/ps5drm.h` | `76b41bb020772699` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/mesa/ac_ps5_drm.cpp` | `92322925518735fe` | ours (Mesa build glue / winsys for libps5gpu) | MIT | - |
 | `ps5gpu/mesa/configure.sh` | `87ef4283ff37bd2f` | ours (Mesa build glue / winsys for libps5gpu) | MIT | - |
 | `ps5gpu/mesa/mesa-ps5-dx12.patch` | `cf2e0cce80cce6e0` | ours (Mesa build glue / winsys for libps5gpu) | MIT | - |
@@ -157,15 +158,15 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `ps5gpu/mesa/shim/sys/ioccom.h` | `11fb33c74894a6ff` | ours (Mesa build glue / winsys for libps5gpu) | MIT | - |
 | `ps5gpu/mesa/shim/sys/ioctl.h` | `6d1852408c9c3306` | ours (Mesa build glue / winsys for libps5gpu) | MIT | - |
 | `ps5gpu/mesa/shim/xf86drm.h` | `232223b22d51a03c` | ours (Mesa build glue / winsys for libps5gpu) | MIT | - |
-| `ps5gpu/tool/backend.h` | `1ec947ffc9775f74` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
-| `ps5gpu/tool/backend_mock.cpp` | `53ac91e19a3a53c0` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | MetalCyan:tests/directload/host_trace.cpp (1 runs, longest 4 lines) |
-| `ps5gpu/tool/backend_win.cpp` | `a8fe0f0cc5a3f248` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
+| `ps5gpu/tool/backend.h` | `f43f507c259d373c` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
+| `ps5gpu/tool/backend_mock.cpp` | `d61f7a3cd7b1279e` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | MetalCyan:tests/directload/host_trace.cpp (1 runs, longest 4 lines) |
+| `ps5gpu/tool/backend_win.cpp` | `71d19193f5db7bf7` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/tool/gpuboot-mock.cpp` | `af8997d9eaa60141` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/tool/layout.h` | `d48bed99830d2922` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/tool/libtest.cpp` | `f80b7c2b26a126c6` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/tool/ps5gpu.c` | `dabd969279d5a021` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/tool/regs.h` | `996064f95d1273ba` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
-| `ps5gpu/tool/stage2.cpp` | `63577c3e43b988d1` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
+| `ps5gpu/tool/stage2.cpp` | `ea2e3c94f71609ba` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/wddm/WDDM2-TABLE.md` | `64d87fb100364e05` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/wddm/build.sh` | `abdbb7415eb10a75` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/wddm/gpuboot.cpp` | `a92e01aa76012a82` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
@@ -186,7 +187,7 @@ finding for that file (`tools/clonecheck.py`; see CLEANROOM.md for how each one 
 | `ps5gpu/win/kit/ps5-gamekit.ps1` | `c77eb679d7f85ac6` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/win/setup/gamebar-off.ps1` | `4ee9c7174930e50d` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/win/setup/shader-cache-dirs.ps1` | `cd37a3fa75d9437e` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
-| `ps5gpu/win/start.cmd` | `3bd151849d2ad557` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
+| `ps5gpu/win/start.cmd` | `4eb56aecc299d4d8` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/win/vkreg/ps5_icd.json` | `d0b4e635971133d6` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/win/vkreg/vk-install.cmd` | `8292ca4827c3b47c` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |
 | `ps5gpu/win/wddm-mode.cmd` | `f14666905384b9d9` | ours (register names from Linux's MIT amdgpu headers, included at build, not copied) | MIT | - |

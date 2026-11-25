@@ -17,6 +17,7 @@
 // firmware.load_type = DIRECT. The microcode load itself is CyanDirectLoad (cleanroom/directload-mit, MIT, written from a
 // facts-only spec; it replaced an earlier non-commercial implementation). Nothing here touches the PSP, the SMU, the display or PCI configuration space;
 // RLC_PG_CNTL bit 23 is set so that the RLC sends no message to the SMU either.
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
@@ -1001,7 +1002,14 @@ int main(int argc, char** argv)
         return gFail ? 1 : 0;
     }
     if (argc < 3) { printf("run needs the firmware directory\n"); return 2; }
-    if (p5_clients() > 0) { printf("STOP: %d program(s) are using the GPU; restarting it would pull the ring from under them. Close them first.\n", p5_clients()); return 1; }
+    if (p5_clients() > 0) {
+        uint32_t pids[16];
+        int n = p5_client_pids(pids, 16);
+        printf("STOP: %d program(s) are using the GPU; restarting it would pull the ring from under them. Close them first. pids:", n);
+        for (int i = 0; i < n; ++i) printf(" %u", pids[i]);
+        printf("\n");
+        return 1;
+    }
     int upto = argc > 3 ? atoi(argv[3]) : 8;
     uint32_t x = argc > 8 ? strtoul(argv[4], NULL, 0) : 200, y = argc > 8 ? strtoul(argv[5], NULL, 0) : 200;
     uint32_t w = argc > 8 ? strtoul(argv[6], NULL, 0) : 400, h = argc > 8 ? strtoul(argv[7], NULL, 0) : 200;
@@ -1021,6 +1029,9 @@ int main(int argc, char** argv)
     memset(c.area, 0, kStoreOff);
     be::flushWrites();
     if (!be::arm(true)) { printf("STOP: could not arm the driver\n"); return 1; }
+    // This Windows start owns the GPU from here on: a client table left by the Windows before a warm Restart is
+    // emptied and counts as gone everywhere (lib/ps5drm.cpp, run record).
+    if (int rb = p5_run_begin()) { printf("STOP: could not mark this Windows start in the shared state (%d)\n", rb); be::arm(false); return 1; }
     bool ok = true;
     gOurIhBase = (uint32_t)((c.areaMc() + 0x40000) >> 8);
     if (ok && upto >= 1) { stepQuiesce(); ok = !gFail; }
@@ -1053,6 +1064,29 @@ int main(int argc, char** argv)
         be::report();
         ok = ok && be::clean();
         printf(ok ? "MOCK LIBTEST: clean\n" : "MOCK LIBTEST: NOT clean\n");
+    }
+    if (ok && upto >= 6 && getenv("MOCK_WARM")) {
+        // A warm Restart: a client stays in the table (its pid "running again"), VRAM stays, the session id is gone.
+        p5_dev* old = nullptr;
+        int o1 = p5_open(&old);
+        int c1 = p5_clients();
+        be::newBoot();
+        uint32_t pids[16];
+        int c2 = p5_clients(), n2 = p5_client_pids(pids, 16);
+        uint64_t seq = 0, fence = 0;
+        int h2 = p5_health(&seq, &fence);
+        p5_dev* early = nullptr;
+        int o2 = p5_open(&early);                        // before this start's run: refused
+        int hk = p5_housekeeping();                      // the watchdog: drops the old clients
+        int rb = p5_run_begin();                         // what run does (the ring itself keeps running in the model)
+        p5_dev* fresh = nullptr;
+        int o3 = p5_open(&fresh);
+        int c3 = p5_clients();
+        bool w = o1 == 0 && c1 == 1 && c2 == 0 && n2 == 0 && h2 != 3 && o2 == -ENXIO && hk >= 0 && rb == 0 && o3 == 0 && c3 == 1;
+        printf("MOCK WARM: before %d/%d, after restart clients %d pids %d health %d early open %d, housekeeping %d, run mark %d, open %d clients %d -> %s\n",
+               o1, c1, c2, n2, h2, o2, hk, rb, o3, c3, w ? "OK" : "WRONG");
+        if (fresh) p5_close(fresh);
+        ok = ok && w;
     }
 #endif
     return ok ? 0 : 1;

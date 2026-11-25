@@ -25,6 +25,13 @@ ways (see Safety in the README). ps5win never reads or runs PS5 games.
 
 **Can I install to an M.2 SSD in the expansion slot?** No, USB drives only, plugged directly into a PS5 port.
 
+**How much memory does the GPU get?** 4 GiB since 1.2 (3 GiB in 1.1), shared by every program; Windows keeps about
+9.9 GiB of RAM. The split is fixed per release: the image's firmware and its launch settings go together, and a
+mismatch stops the launch with a message (nothing is damaged). To change it, install the matching release.
+
+**Is it stable enough for real work?** No, it's a beta. Don't rely on it for anything valuable or that can't be
+interrupted, and keep backups elsewhere.
+
 **Why is Windows Update off?** The firmware patches the Windows kernel for the PS5's CPU, matched to the kernel build.
 An update could replace the kernel. Fixes come through ps5win releases. Microsoft Defender still updates its
 definitions by itself when the console is online.

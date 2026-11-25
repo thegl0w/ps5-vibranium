@@ -7,7 +7,7 @@
 //  * the hand-over RECORD at PS5_WARM_RECORD (12 GiB + 0xF0000): reserved RAM that neither the firmware nor Windows is
 //    given. Stage 1 fills it at every run (entry, boot_params, frame buffer); it also carries the arming flag, the loop
 //    counter and the last stub step from one loop to the next. A launch from Linux starts it unarmed, loop 0.
-//  * the BLOCK: 16 pages of EfiRuntimeServicesData below 4 GiB that this firmware allocates at boot. Windows maps it for
+//  * the BLOCK: 17 pages of EfiRuntimeServicesData below 4 GiB that this firmware allocates at boot. Windows maps it for
 //    our runtime code and never uses it. It holds the stub, its GDT and identity page tables, and copies of the record's
 //    values (the record itself is not mapped while Windows runs).
 //
@@ -19,7 +19,7 @@
 #define PS5_WARM_RECORD        0x3000F0000ULL
 #define PS5_WARM_RECORD_MAGIC  0x3143455257355350ULL      // "PS5WREC1"
 #define PS5_WARM_BLOCK_MAGIC   0x314D5257U                // "WRM1"
-#define PS5_WARM_BLOCK_PAGES   16
+#define PS5_WARM_BLOCK_PAGES   17                         // 16 + the split carve-out page directory (BLK_PDC)
 #define PS5_WARM_CAP_DEFAULT   20                         // loops before Restart falls back to the ICC restart
 #define PS5_WARM_TEST_3A       0x1                        // record flag: firmware-only loop test (launch option ps5warm=3a)
 #define PS5_WARM_DIAG_SIZE     0x110                      // = WPD_SIZE (warm_pci.h; checked in Ps5Warm.c)
@@ -87,6 +87,7 @@
 #define BLK_SW_PT     0xA000
 #define BLK_PDPT2     0xB000   // 512 GiB - 1 TiB, 1 GiB pages
 #define BLK_STACK_TOP 0x10000
+#define BLK_PDC       0x10000  // 2 MiB pages for the 1 GiB that holds the carve-out base when it is not 1 GiB-aligned (5 GiB: 0x330000000)
 
 #ifndef __ASSEMBLER__
 VOID     Ps5WarmInit (VOID);                     // constructor, boot time

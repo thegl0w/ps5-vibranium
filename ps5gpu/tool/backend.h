@@ -15,6 +15,10 @@ namespace be
     bool pidAlive(uint32_t pid);
     bool isCompositor();                         // this process is the desktop compositor (dwm.exe): it may use the reserved client slots
     uint64_t bootStamp();                        // the same for every program until Windows restarts
+    // This Windows start's GPU session: a random id that `ps5gpu2 run` makes (create = true, administrator) and keeps
+    // in a volatile registry value, so it is gone after any restart (a warm one too) and does not move with the clock.
+    // 0 = no run since Windows started.
+    uint64_t sessionId(bool create);
     bool arm(bool on);
     bool rd(uint32_t reg, uint32_t& value);     // false: the driver refused the access
     bool wr(uint32_t reg, uint32_t value);
@@ -28,6 +32,7 @@ namespace be
 #ifdef PS5GPU_MOCK
     uint32_t lastPid();                          // what pid() returned last
     void killPid(uint32_t pid);                  // pidAlive() says no for this one from now on
+    void newBoot();                              // a warm restart: VRAM stays, the session id is gone
     void report();
     bool clean();
     uint8_t* vram();

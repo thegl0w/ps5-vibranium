@@ -112,6 +112,9 @@ ping -n 6 127.0.0.1 > nul
 goto loop
 
 :gpustuck
+rem Right after a Windows start the automatic GPU start (autostart.cmd, marker autostart.trying) may be halfway, and the
+rem GPU looks halted until it is done. Two GPU starts at once fail each other (2026-11-24 and -25): wait for it.
+if exist C:\ps5\gpu\autostart.trying goto sleep
 echo %date% %time% GPU stuck (health %HS%, fence %HF%): recovering >> %LOG%
 call C:\ps5\gpu\gpu-recover.cmd >> %LOG% 2>&1
 set STUCK=0

@@ -80,6 +80,10 @@ int p5_housekeeping(void);
 int p5_health(uint64_t* seq, uint64_t* fence);
 /* Process ids of the programs that have the GPU open; returns how many (at most max). */
 int p5_client_pids(uint32_t* pids, int max);
+/* For `ps5gpu2 run` only (administrator), right before it restarts the GPU: makes this Windows start's session id and
+ * stamps the shared state with it, and empties the client table (nobody may be attached: run checks p5_clients first).
+ * After a warm Restart the table of the Windows before then counts as gone everywhere. 0 or negative errno. */
+int p5_run_begin(void);
 /* The shared state as text (clients, their pids and memory, heap), without attaching. For debugging. */
 int p5_state_text(char* out, int size);
 /* Debugging: map the shared area and pool (and the whole heap if `heap`) like p5_open, hold them `ms`, unmap; no
