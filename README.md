@@ -302,7 +302,7 @@ PS5 itself.
 
 ## Credits
 
-Made by the gl0w (Hasham Tariq).
+Made by the gl0w.
 
 Credits required by the licences of code PS5 Vibranium uses or ships:
 
