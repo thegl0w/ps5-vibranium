@@ -1,6 +1,6 @@
-# Linux kernel in ps5win: corresponding source (GPL-2.0)
+# Linux kernel in PS5 Vibranium: corresponding source (GPL-2.0)
 
-ps5win ships one Linux kernel build, used twice:
+PS5 Vibranium ships one Linux kernel build, used twice:
 
 - the image's Linux (`boot` partition, `bzImage`), and
 - the launch package's stage kernel (`windows.bzImage`), which is the same kernel binary wrapped with a small stub

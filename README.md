@@ -1,8 +1,10 @@
-# ps5win: Windows 10 on the PlayStation 5, with a GPU driver
+# PS5 Vibranium: Windows 10 on the PlayStation 5, with a GPU driver
+
+*Formerly ps5win. Named after Vibranium, Microsoft's codename for the Windows 10 release it runs.*
 
 > **Beta (1.2).** Expect rough edges, and please report what you find.
 >
-> **Don't rely on it for important work.** ps5win moves faster than we can test every combination, so releases ship
+> **Don't rely on it for important work.** PS5 Vibranium moves faster than we can test every combination, so releases ship
 > what works on our console rather than waiting until every part is finished and checked. Don't use it for anything
 > valuable, anything that has to be stable, or anything that can't be interrupted: keep your files backed up
 > elsewhere and expect the odd hang, blue screen or restart.
@@ -13,7 +15,7 @@
 > **Built with AI assistance.** Much of the code and documentation was written with Claude (Claude Code), directed,
 > reviewed and tested on real hardware by the author.
 
-ps5win installs **Windows 10 IoT Enterprise LTSC 2021** on a launch-model PS5 and runs it bare metal from a USB drive.
+PS5 Vibranium installs **Windows 10 IoT Enterprise LTSC 2021** on a launch-model PS5 and runs it bare metal from a USB drive.
 Its own GPU driver gives Windows a GPU-accelerated desktop, Vulkan, OpenGL, and Direct3D 8 to 12 games through DXVK
 and vkd3d-proton, including older games at their own low resolutions.
 
@@ -97,7 +99,7 @@ Enterprise LTSC 2021.
 
   Check yours with `shasum -a 256 <file>` (macOS/Linux) or `Get-FileHash <file>` (Windows). The installer checks the
   edition and kernel build before writing anything, and refuses anything else with a message. This is the version
-  ps5win is developed and tested on day to day. Other editions and languages of the same build (19044.1288) are
+  PS5 Vibranium is developed and tested on day to day. Other editions and languages of the same build (19044.1288) are
   planned but untested.
 - **Or: Windows 10 22H2, the free download from Microsoft** (also other Windows 10 2004–22H2 media; Pro by default).
   **It works:** installed on a console from Microsoft's own Windows 10 22H2 English ISO (Pro), reached the desktop
@@ -176,11 +178,11 @@ Your Windows here is less locked down than a normal install:
   `FFF55A50F03F8740C061C26FD79FA5B06FA40953`; valid from 2000 so a console with a reset clock still accepts it)
   is added to the *Trusted Root* and *Trusted Publishers* stores. It is limited to code signing (extended key usage
   Code Signing only, `CA:FALSE`), so it can't vouch for websites or issue other certificates. Its private key is not
-  part of ps5win's downloads.
+  part of PS5 Vibranium's downloads.
 - **Microsoft Defender** stays on and keeps its virus definitions up to date by itself when the console is online
   (Ethernet), even with Windows Update off: on a fresh install it fetched current definitions within about 20 minutes.
 - **Windows Update is off.** The firmware's kernel patch must match the exact ntoskrnl build, so an update could stop
-  Windows from booting. Fixes and updates come through ps5win releases.
+  Windows from booting. Fixes and updates come through PS5 Vibranium releases.
 - **The default account `ps5` has no password and logs on automatically.** Windows refuses network logons to accounts
   with an empty password, and neither Windows nor the Linux side runs an SSH server or any other remote login.
   Anyone at the console can still use it. Set a password in Windows after the install (Ctrl+Alt+Del, then
@@ -214,7 +216,7 @@ Your Windows here is less locked down than a normal install:
 | A USB drive plugged in while Windows runs never gets a drive letter, and replugging it does nothing | The drive (or its adapter) stopped answering, and Windows waits for it. Restart Windows. That restart can hang for a few minutes and end in a blue screen; it then comes back by itself. Nothing is lost on the drive. |
 | Ethernet is connected but gets no address | Windows asks a DHCP server for its address, like any PC: plug the cable into a router, or, for a direct cable to a Mac, turn on Internet Sharing for that adapter (on Windows: Internet Connection Sharing). |
 | Ethernet says "Network cable unplugged" | Plug the cable in **before** you start the console: the Linux step brings the port up and the Windows driver takes it over. If it was never plugged in at the start, restart with the cable in. A cable pulled and replugged while Windows runs reconnects, possibly at 100 Mbit/s. |
-| The console says it "wasn't turned off properly", or shows a storage check / repair screen when it next starts normally | Expected and harmless. Windows (and Linux) power the console off through its power controller directly, so the console's own shutdown never runs. Clearing that note would mean writing to Sony's settings storage, which ps5win never does. |
+| The console says it "wasn't turned off properly", or shows a storage check / repair screen when it next starts normally | Expected and harmless. Windows (and Linux) power the console off through its power controller directly, so the console's own shutdown never runs. Clearing that note would mean writing to Sony's settings storage, which PS5 Vibranium never does. |
 
 ## How it works
 
@@ -268,7 +270,7 @@ Drivers must be test-signed with a code-signing certificate of your own (`ps5gpu
 
 ## Source code and licences
 
-ps5win distributes binaries of these projects. Each keeps its own licence; the exact source versions we shipped and
+PS5 Vibranium distributes binaries of these projects. Each keeps its own licence; the exact source versions we shipped and
 our patches are linked here.
 
 | Project | Licence | Where it is | Source |
@@ -295,14 +297,14 @@ GPL-2.0), the firmware's restart/shutdown library and the GPU microcode loader. 
 ## Related projects
 
 **Related:** [Nagi](https://github.com/D-Ogi/amdgpu-wddm) is a source-available Windows (WDDM) driver stack for the
-same GPU family on the AMD BC-250 board. ps5win is a separate project with its own driver, and it boots Windows on the
+same GPU family on the AMD BC-250 board. PS5 Vibranium is a separate project with its own driver, and it boots Windows on the
 PS5 itself.
 
 ## Credits
 
 Made by the gl0w (Hasham Tariq).
 
-Credits required by the licences of code ps5win uses or ships:
+Credits required by the licences of code PS5 Vibranium uses or ships:
 
 - **[ps5-hackintosh](https://github.com/rodri0x/ps5-hackintosh)** by rodri0x (MIT): the launcher stub and the base of
   the UEFI firmware build (EDK2 payload setup, bundle maker).
@@ -316,4 +318,4 @@ Interactive Entertainment. Windows is a trademark of Microsoft.
 
 ## Official source and forks
 
-The only official source of ps5win is this repository. Builds, images or "installers" offered elsewhere may be modified; don't run them. If you fork ps5win and publish your own builds, please give them a different name so users can tell them apart.
+The only official source of PS5 Vibranium is this repository. Builds, images or "installers" offered elsewhere may be modified; don't run them. If you fork PS5 Vibranium and publish your own builds, please give them a different name so users can tell them apart.

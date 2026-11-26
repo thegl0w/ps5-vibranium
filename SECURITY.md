@@ -6,7 +6,7 @@ Please report security problems **privately**, through GitHub's private vulnerab
 of this repository, then **Report a vulnerability**. Do not open a public issue, discussion or pull request for a
 security bug; those are visible to everyone before a fix exists.
 
-Include what you found, how to reproduce it, which ps5win release and which Windows build you used, and what an
+Include what you found, how to reproduce it, which PS5 Vibranium release and which Windows build you used, and what an
 attacker could do with it.
 
 ## In scope

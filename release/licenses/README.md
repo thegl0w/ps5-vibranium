@@ -1,4 +1,4 @@
-# Licence texts for the third-party parts ps5win ships
+# Licence texts for the third-party parts PS5 Vibranium ships
 
 | Part | Licence | File here |
 |---|---|---|

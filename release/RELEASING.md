@@ -1,4 +1,4 @@
-# Releasing ps5win
+# Releasing PS5 Vibranium
 
 The steps for one release, in order. Nothing is published before step 5.
 

@@ -5,7 +5,7 @@ not supported.
 
 **Which firmware versions work?** Any firmware that can load Linux.
 
-**How is this different from just booting Windows on a PS5?** ps5win brings its own GPU driver: a WDDM display
+**How is this different from just booting Windows on a PS5?** PS5 Vibranium brings its own GPU driver: a WDDM display
 driver, Vulkan through Mesa RADV, and Direct3D 9 to 12 games through DXVK and vkd3d-proton. Without a GPU driver
 Windows falls back to the basic display adapter: no acceleration and no games. See the table at the top of the README
 for what works and what doesn't yet.
@@ -21,7 +21,7 @@ SHA-256 given there) is the tested one. Windows 10 22H2 and other 2004–22H2 me
 and kernel before writing and refuses anything it can't patch. You bring the ISO and your own licence.
 
 **Does it touch the PS5's internal SSD or my PS5 games?** No. The internal NVMe is hidden from Windows and blocked three
-ways (see Safety in the README). ps5win never reads or runs PS5 games.
+ways (see Safety in the README). PS5 Vibranium never reads or runs PS5 games.
 
 **Can I install to an M.2 SSD in the expansion slot?** No, USB drives only, plugged directly into a PS5 port.
 
@@ -33,7 +33,7 @@ mismatch stops the launch with a message (nothing is damaged). To change it, ins
 interrupted, and keep backups elsewhere.
 
 **Why is Windows Update off?** The firmware patches the Windows kernel for the PS5's CPU, matched to the kernel build.
-An update could replace the kernel. Fixes come through ps5win releases. Microsoft Defender still updates its
+An update could replace the kernel. Fixes come through PS5 Vibranium releases. Microsoft Defender still updates its
 definitions by itself when the console is online.
 
 **Why is the screen black for a second after the desktop appears on the second start?** That is the switch to the full
@@ -48,7 +48,7 @@ game kit skips those games.
 
 **Why does the console say it wasn't turned off properly, or check its storage when it next starts normally?**
 Expected and harmless: Windows turns the console off through its power controller directly, without the console's own
-shutdown, so the console checks itself at the next normal start. ps5win never writes to the console's internal storage.
+shutdown, so the console checks itself at the next normal start. PS5 Vibranium never writes to the console's internal storage.
 
 **120 Hz? Wi-Fi? Bluetooth? Blu-ray drive?** Not in this release. 120 Hz works in development; Wi-Fi needs a clean
 driver build; Bluetooth and the Blu-ray drive are not done yet.

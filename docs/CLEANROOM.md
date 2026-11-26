@@ -5,9 +5,9 @@ comes from, and what an automated comparison against the code we read found.
 
 ## The three clean-room parts
 
-Three parts of ps5win first followed code under other licences. Each was rewritten from a written description only:
+Three parts of PS5 Vibranium first followed code under other licences. Each was rewritten from a written description only:
 one person read the original and wrote a specification of the hardware behaviour and the interface the rest of
-ps5win needs; the rewrite was written from that specification without opening the original. The questions the
+PS5 Vibranium needs; the rewrite was written from that specification without opening the original. The questions the
 implementer asked and the answers are kept next to the specs.
 
 | Part | Specification | Rewrite (MIT) | What it replaced |

@@ -1,4 +1,4 @@
-# Contributing to ps5win
+# Contributing to PS5 Vibranium
 
 Thank you for helping. Please read this first; it is short.
 
@@ -30,4 +30,4 @@ log). Changes nobody could test on a PS5 are welcome as drafts, marked as untest
 ## Forks
 
 If you publish your own builds, please give them a different name, so users can tell them apart from official
-ps5win releases.
+PS5 Vibranium releases.

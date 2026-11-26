@@ -10,7 +10,7 @@ body:
     attributes:
       label: Did Windows start?
       options:
-        - "The PS5 Linux loader did not start (not a ps5win problem: see the loader's own project)"
+        - "The PS5 Linux loader did not start (not a PS5 Vibranium problem: see the loader's own project)"
         - "The loader started, but the installer did not finish"
         - "The installer finished, but Windows did not boot"
         - "Windows booted, but something does not work"
@@ -39,7 +39,7 @@ body:
   - type: input
     id: version
     attributes:
-      label: ps5win release (image file name or SHA-256)
+      label: PS5 Vibranium release (image file name or SHA-256)
     validations: {required: true}
   - type: textarea
     id: what
